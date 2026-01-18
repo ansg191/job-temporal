@@ -22,7 +22,7 @@ func main() {
 		TaskQueue: "my-task-queue",
 	}
 
-	we, err := c.ExecuteWorkflow(context.Background(), options, workflows.AgentWorkflow, os.Args[1])
+	we, err := c.ExecuteWorkflow(context.Background(), options, workflows.AgentWorkflow, os.Getenv("REMOTE"), os.Args[1])
 	if err != nil {
 		log.Fatalln("Unable to execute workflow", err)
 	}

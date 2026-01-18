@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+)
+
+const (
+	gitAuthorName  = "job-temporal"
+	gitAuthorEmail = "job-temporal@anshulg.com"
 )
 
 // Repository references a git repository on the system stored in a tmp directory
@@ -89,25 +95,60 @@ func (r *Repository) GetBranch(ctx context.Context) (string, error) {
 	return branch, nil
 }
 
-// SetBranch sets the current branch of the repository, creating if necessary
+// SetBranch sets the current branch of the repository, checking out from remote if possible, else creating if necessary
 func (r *Repository) SetBranch(ctx context.Context, branch string) error {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return fmt.Errorf("branch name is required")
 	}
 
-	verify := r.gitCmd(ctx, "rev-parse", "--verify", fmt.Sprintf("refs/heads/%s", branch))
-	var verifyOut, verifyErr bytes.Buffer
-	verify.Stdout = &verifyOut
-	verify.Stderr = &verifyErr
-
-	branchExists := verify.Run() == nil
+	// Check if local branch exists
+	verifyLocal := r.gitCmd(ctx, "rev-parse", "--verify", fmt.Sprintf("refs/heads/%s", branch))
+	var verifyLocalErr bytes.Buffer
+	verifyLocal.Stderr = &verifyLocalErr
+	localBranchExists := verifyLocal.Run() == nil
 
 	var cmd *exec.Cmd
-	if !branchExists {
-		cmd = r.gitCmd(ctx, "checkout", "-b", branch)
-	} else {
+	if localBranchExists {
+		// Local branch exists, just checkout
 		cmd = r.gitCmd(ctx, "checkout", branch)
+	} else {
+		// Local branch doesn't exist, check if remote branch exists
+		// Use ls-remote with the actual remote URL (more reliable than "origin" alias)
+		checkRemoteCmd := r.gitCmd(ctx, "ls-remote", "--heads", r.remote)
+		var checkRemoteOut bytes.Buffer
+		checkRemoteCmd.Stdout = &checkRemoteOut
+		checkRemoteErr := checkRemoteCmd.Run()
+
+		// Look for refs/heads/<branch> in the output
+		remoteBranchExists := false
+		expectedRef := fmt.Sprintf("refs/heads/%s", branch)
+		if checkRemoteErr == nil {
+			for _, line := range strings.Split(checkRemoteOut.String(), "\n") {
+				if strings.HasSuffix(strings.TrimSpace(line), expectedRef) {
+					remoteBranchExists = true
+					break
+				}
+			}
+		}
+
+		if remoteBranchExists {
+			// Fetch the branch (this populates FETCH_HEAD)
+			fetchCmd := r.gitCmd(ctx, "fetch", "--depth", "1", "origin", branch)
+			var fetchStderr bytes.Buffer
+			fetchCmd.Stderr = &fetchStderr
+			if err := fetchCmd.Run(); err != nil {
+				if errMsg := strings.TrimSpace(fetchStderr.String()); errMsg != "" {
+					return fmt.Errorf("git fetch failed: %s: %w", errMsg, err)
+				}
+				return fmt.Errorf("git fetch failed: %w", err)
+			}
+			// Checkout from FETCH_HEAD with force to ensure working tree is updated
+			cmd = r.gitCmd(ctx, "checkout", "-f", "-B", branch, "FETCH_HEAD")
+		} else {
+			// Neither local nor remote branch exists, create new branch
+			cmd = r.gitCmd(ctx, "checkout", "-b", branch)
+		}
 	}
 
 	var stderr bytes.Buffer
@@ -123,8 +164,8 @@ func (r *Repository) SetBranch(ctx context.Context, branch string) error {
 	return nil
 }
 
-// getHeadCommit returns the SHA of the HEAD commit of the repository
-func (r *Repository) getHeadCommit(ctx context.Context) (string, error) {
+// GetHeadCommit returns the SHA of the HEAD commit of the repository
+func (r *Repository) GetHeadCommit(ctx context.Context) (string, error) {
 	cmd := r.gitCmd(ctx, "rev-parse", "HEAD")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -145,26 +186,20 @@ func (r *Repository) getHeadCommit(ctx context.Context) (string, error) {
 	return sha, nil
 }
 
-// GetFile returns the contents of a file at the HEAD commit
+// GetFile returns the contents of a file from the working directory
 func (r *Repository) GetFile(ctx context.Context, filePath string) (string, error) {
 	filePath = strings.TrimSpace(filePath)
 	if filePath == "" {
 		return "", fmt.Errorf("file path is required")
 	}
 
-	cmd := r.gitCmd(ctx, "show", fmt.Sprintf("HEAD:%s", filePath))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
-			return "", fmt.Errorf("git show failed: %s: %w", errMsg, err)
-		}
-		return "", fmt.Errorf("git show failed: %w", err)
+	fullPath := filepath.Join(r.path, filePath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
-	return stdout.String(), nil
+	return string(content), nil
 }
 
 // pullBranch updates the current branch to the latest changes from the remote
@@ -185,6 +220,15 @@ func (r *Repository) pullBranch(ctx context.Context) error {
 	branch, err := r.GetBranch(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Check if the remote branch exists before pulling
+	checkRemoteCmd := r.gitCmd(ctx, "ls-remote", "--heads", "origin", branch)
+	var checkRemoteOut bytes.Buffer
+	checkRemoteCmd.Stdout = &checkRemoteOut
+	if err := checkRemoteCmd.Run(); err == nil && strings.TrimSpace(checkRemoteOut.String()) == "" {
+		// Remote branch doesn't exist, nothing to pull
+		return nil
 	}
 
 	// Pull changes from origin for the current branch
@@ -234,7 +278,7 @@ func (r *Repository) EditFile(ctx context.Context, commitID, patch, msg string) 
 	}
 
 	// Step 2: Verify that the previous commit SHA is the HEAD
-	headCommit, err := r.getHeadCommit(ctx)
+	headCommit, err := r.GetHeadCommit(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get HEAD commit: %w", err)
 	}
@@ -264,6 +308,12 @@ func (r *Repository) EditFile(ctx context.Context, commitID, patch, msg string) 
 
 	// Step 4: Commit with message
 	commitCmd := r.gitCmd(ctx, "commit", "-m", msg)
+	commitCmd.Env = append(commitCmd.Env,
+		"GIT_AUTHOR_NAME="+gitAuthorName,
+		"GIT_AUTHOR_EMAIL="+gitAuthorEmail,
+		"GIT_COMMITTER_NAME="+gitAuthorName,
+		"GIT_COMMITTER_EMAIL="+gitAuthorEmail,
+	)
 	var commitStderr bytes.Buffer
 	commitCmd.Stderr = &commitStderr
 
@@ -292,7 +342,7 @@ func (r *Repository) EditFile(ctx context.Context, commitID, patch, msg string) 
 	}
 
 	// Step 6: Return the new HEAD commit SHA
-	newHead, err := r.getHeadCommit(ctx)
+	newHead, err := r.GetHeadCommit(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get new HEAD commit: %w", err)
 	}

@@ -142,26 +142,190 @@ func TestRepositoryGetBranch(t *testing.T) {
 
 func TestRepositorySetBranch(t *testing.T) {
 	t.Parallel()
-	repo, _, _ := newRepoFixture(t)
-	ctx := t.Context()
 
-	if err := repo.SetBranch(ctx, "feature/test-branch"); err != nil {
-		t.Fatalf("SetBranch create failed: %v", err)
-	}
+	t.Run("creates new branch when not exists locally or remotely", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newRepoFixture(t)
+		ctx := t.Context()
 
-	branch, err := repo.GetBranch(ctx)
-	if err != nil {
-		t.Fatalf("GetBranch after create failed: %v", err)
-	}
-	if branch != "feature/test-branch" {
-		t.Fatalf("expected branch 'feature/test-branch', got %q", branch)
-	}
+		if err := repo.SetBranch(ctx, "feature/test-branch"); err != nil {
+			t.Fatalf("SetBranch create failed: %v", err)
+		}
+
+		branch, err := repo.GetBranch(ctx)
+		if err != nil {
+			t.Fatalf("GetBranch after create failed: %v", err)
+		}
+		if branch != "feature/test-branch" {
+			t.Fatalf("expected branch 'feature/test-branch', got %q", branch)
+		}
+	})
+
+	t.Run("checks out existing local branch", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newRepoFixture(t)
+		ctx := t.Context()
+
+		// Create a branch first
+		if err := repo.SetBranch(ctx, "feature/local-branch"); err != nil {
+			t.Fatalf("SetBranch create failed: %v", err)
+		}
+
+		// Switch to main
+		if err := repo.SetBranch(ctx, "main"); err != nil {
+			t.Fatalf("SetBranch to main failed: %v", err)
+		}
+
+		// Switch back to the local branch (should checkout existing)
+		if err := repo.SetBranch(ctx, "feature/local-branch"); err != nil {
+			t.Fatalf("SetBranch to existing local branch failed: %v", err)
+		}
+
+		branch, err := repo.GetBranch(ctx)
+		if err != nil {
+			t.Fatalf("GetBranch failed: %v", err)
+		}
+		if branch != "feature/local-branch" {
+			t.Fatalf("expected branch 'feature/local-branch', got %q", branch)
+		}
+	})
+
+	t.Run("checks out from remote when branch exists only on remote", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newLocalRepoFixture(t)
+		ctx := t.Context()
+
+		// Create a branch on the remote by using another clone
+		cloneDir, err := os.MkdirTemp(os.TempDir(), "*-clone-repo")
+		if err != nil {
+			t.Fatalf("failed to create clone dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(cloneDir) })
+
+		cmd := exec.Command("git", "clone", repo.remote, cloneDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git clone failed: %v\n%s", err, out)
+		}
+
+		runGit(t, cloneDir, "config", "user.email", "test@test.com")
+		runGit(t, cloneDir, "config", "user.name", "Test User")
+
+		// Create and push a new branch from the clone
+		runGit(t, cloneDir, "checkout", "-b", "feature/remote-only")
+		remoteFile := filepath.Join(cloneDir, "remote-file.txt")
+		if err := os.WriteFile(remoteFile, []byte("remote content"), 0o644); err != nil {
+			t.Fatalf("write remote file failed: %v", err)
+		}
+		runGit(t, cloneDir, "add", "remote-file.txt")
+		runGit(t, cloneDir, "commit", "-m", "commit on remote branch")
+		runGit(t, cloneDir, "push", "-u", "origin", "feature/remote-only")
+
+		// Now SetBranch should checkout from remote
+		if err := repo.SetBranch(ctx, "feature/remote-only"); err != nil {
+			t.Fatalf("SetBranch from remote failed: %v", err)
+		}
+
+		branch, err := repo.GetBranch(ctx)
+		if err != nil {
+			t.Fatalf("GetBranch failed: %v", err)
+		}
+		if branch != "feature/remote-only" {
+			t.Fatalf("expected branch 'feature/remote-only', got %q", branch)
+		}
+
+		// Verify we got the file from the remote branch
+		data, err := repo.GetFile(ctx, "remote-file.txt")
+		if err != nil {
+			t.Fatalf("GetFile failed: %v", err)
+		}
+		if data != "remote content" {
+			t.Fatalf("expected 'remote content', got %q", data)
+		}
+	})
+
+	t.Run("returns error for empty branch name", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newRepoFixture(t)
+		ctx := t.Context()
+
+		err := repo.SetBranch(ctx, "")
+		if err == nil {
+			t.Fatal("expected error for empty branch name, got nil")
+		}
+		if !strings.Contains(err.Error(), "branch name is required") {
+			t.Fatalf("expected error containing 'branch name is required', got %q", err.Error())
+		}
+	})
+
+	t.Run("checks out from remote in shallow clone", func(t *testing.T) {
+		t.Parallel()
+		ensureGitAvailable(t)
+		ctx := t.Context()
+
+		// Create a bare remote with a non-default branch
+		bareDir := createBareRemote(t)
+
+		// Use a full clone to create a branch on the remote
+		cloneDir, err := os.MkdirTemp(os.TempDir(), "*-clone-repo")
+		if err != nil {
+			t.Fatalf("failed to create clone dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(cloneDir) })
+
+		cmd := exec.Command("git", "clone", bareDir, cloneDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git clone failed: %v\n%s", err, out)
+		}
+
+		runGit(t, cloneDir, "config", "user.email", "test@test.com")
+		runGit(t, cloneDir, "config", "user.name", "Test User")
+
+		// Create and push a new branch
+		runGit(t, cloneDir, "checkout", "-b", "feature/shallow-test")
+		testFile := filepath.Join(cloneDir, "shallow-test.txt")
+		if err := os.WriteFile(testFile, []byte("shallow clone content"), 0o644); err != nil {
+			t.Fatalf("write file failed: %v", err)
+		}
+		runGit(t, cloneDir, "add", "shallow-test.txt")
+		runGit(t, cloneDir, "commit", "-m", "commit on feature branch")
+		runGit(t, cloneDir, "push", "-u", "origin", "feature/shallow-test")
+
+		// Now use NewGitRepo which does a shallow clone (--depth 1)
+		// This will only fetch the default branch (main), not feature/shallow-test
+		repo, err := NewGitRepo(ctx, bareDir)
+		if err != nil {
+			t.Fatalf("NewGitRepo failed: %v", err)
+		}
+		t.Cleanup(func() { _ = repo.Close() })
+
+		// SetBranch should work even though the branch wasn't in the shallow clone
+		if err := repo.SetBranch(ctx, "feature/shallow-test"); err != nil {
+			t.Fatalf("SetBranch from remote in shallow clone failed: %v", err)
+		}
+
+		branch, err := repo.GetBranch(ctx)
+		if err != nil {
+			t.Fatalf("GetBranch failed: %v", err)
+		}
+		if branch != "feature/shallow-test" {
+			t.Fatalf("expected branch 'feature/shallow-test', got %q", branch)
+		}
+
+		// Verify we got the file from the remote branch
+		data, err := repo.GetFile(ctx, "shallow-test.txt")
+		if err != nil {
+			t.Fatalf("GetFile failed: %v", err)
+		}
+		if data != "shallow clone content" {
+			t.Fatalf("expected 'shallow clone content', got %q", data)
+		}
+	})
 }
 
 func TestRepositoryGetHeadCommit(t *testing.T) {
 	t.Parallel()
 	repo, _, _ := newRepoFixture(t)
-	sha, err := repo.getHeadCommit(t.Context())
+	sha, err := repo.GetHeadCommit(t.Context())
 	if err != nil {
 		t.Fatalf("getHeadCommit failed: %v", err)
 	}
@@ -338,7 +502,7 @@ func TestRepositoryEditFile(t *testing.T) {
 	ctx := t.Context()
 
 	// Get current HEAD
-	headCommit, err := repo.getHeadCommit(ctx)
+	headCommit, err := repo.GetHeadCommit(ctx)
 	if err != nil {
 		t.Fatalf("getHeadCommit failed: %v", err)
 	}
@@ -379,7 +543,7 @@ func TestRepositoryEditFileAncestorCheck(t *testing.T) {
 	ctx := t.Context()
 
 	// Get current HEAD
-	oldHead, err := repo.getHeadCommit(ctx)
+	oldHead, err := repo.GetHeadCommit(ctx)
 	if err != nil {
 		t.Fatalf("getHeadCommit failed: %v", err)
 	}

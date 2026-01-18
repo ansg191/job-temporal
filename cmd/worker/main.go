@@ -23,8 +23,8 @@ func main() {
 	w.RegisterActivity(activities.Greet)
 	w.RegisterWorkflow(workflows.AgentWorkflow)
 	w.RegisterActivity(activities.CallAI)
-	w.RegisterActivity(activities.ToolGetName)
-	w.RegisterActivity(activities.ToolReadFile)
+	w.RegisterActivity(activities.ReadFile)
+	w.RegisterActivity(activities.EditFile)
 
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
