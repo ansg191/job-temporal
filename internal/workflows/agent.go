@@ -14,7 +14,8 @@ import (
 func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("You are a helpful assistant. " +
-			"Use read_file to read a file. Use edit_file to edit a file. Do not call edit_file unnecessarily (if no change required)."),
+			"Use read_file to read a file. Use edit_file to edit a file. Do not call edit_file unnecessarily (if no change required)." +
+			"Call build tool to compile the resume to check for errors. Always build and check for errors"),
 		openai.UserMessage(input),
 	}
 
@@ -34,6 +35,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				Tools: []openai.ChatCompletionToolUnionParam{
 					tools.ReadFileToolDesc,
 					tools.EditFileToolDesc,
+					tools.BuildToolDesc,
 				},
 			},
 		).Get(ctx, &result)
@@ -52,7 +54,8 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				name := call.Function.Name
 				args := call.Function.Arguments
 
-				if name == tools.ReadFileToolDesc.OfFunction.Function.Name {
+				switch name {
+				case tools.ReadFileToolDesc.OfFunction.Function.Name:
 					req := activities.ReadFileRequest{
 						AllowList:  []string{"person.typ", "projects.typ"},
 						RepoRemote: remote,
@@ -65,7 +68,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 					}
 
 					futs[i] = workflow.ExecuteActivity(ctx, activities.ReadFile, req)
-				} else if name == tools.EditFileToolDesc.OfFunction.Function.Name {
+				case tools.EditFileToolDesc.OfFunction.Function.Name:
 					req := activities.EditFileRequest{
 						ReadFileRequest: activities.ReadFileRequest{
 							AllowList:  []string{"person.typ", "projects.typ"},
@@ -80,6 +83,13 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 					}
 
 					futs[i] = workflow.ExecuteActivity(ctx, activities.EditFile, req)
+				case tools.BuildToolDesc.OfFunction.Function.Name:
+					req := activities.BuildRequest{
+						RepoRemote: remote,
+						Branch:     "abc",
+						Builder:    "typst",
+					}
+					futs[i] = workflow.ExecuteActivity(ctx, activities.Build, req)
 				}
 			}
 

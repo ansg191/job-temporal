@@ -42,6 +42,10 @@ func (r *Repository) Close() error {
 	return os.RemoveAll(r.path)
 }
 
+func (r *Repository) Path() string {
+	return r.path
+}
+
 // gitCmd creates an exec.Cmd for git with proper environment variables set
 func (r *Repository) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", r.path}, args...)...)
