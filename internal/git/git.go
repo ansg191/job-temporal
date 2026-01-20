@@ -99,6 +99,31 @@ func (r *Repository) GetBranch(ctx context.Context) (string, error) {
 	return branch, nil
 }
 
+// ListBranches lists all local and remote branches in the repository
+func (r *Repository) ListBranches(ctx context.Context) ([]string, error) {
+	cmd := r.gitCmd(ctx, "branch", "-a")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			return nil, fmt.Errorf("git branch -a failed: %s: %w", errMsg, err)
+		}
+		return nil, fmt.Errorf("git branch -a failed: %w", err)
+	}
+
+	var branches []string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		branch := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		if branch != "" {
+			branches = append(branches, branch)
+		}
+	}
+
+	return branches, nil
+}
+
 // SetBranch sets the current branch of the repository, checking out from remote if possible, else creating if necessary
 func (r *Repository) SetBranch(ctx context.Context, branch string) error {
 	branch = strings.TrimSpace(branch)

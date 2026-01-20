@@ -334,6 +334,166 @@ func TestRepositoryGetHeadCommit(t *testing.T) {
 	}
 }
 
+func TestRepositoryListBranches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns current branch", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newRepoFixture(t)
+		ctx := t.Context()
+
+		branches, err := repo.ListBranches(ctx)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+
+		currentBranch, err := repo.GetBranch(ctx)
+		if err != nil {
+			t.Fatalf("GetBranch failed: %v", err)
+		}
+
+		found := false
+		for _, b := range branches {
+			if b == currentBranch {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected current branch %q in list %v", currentBranch, branches)
+		}
+	})
+
+	t.Run("returns local branches", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newLocalRepoFixture(t)
+		ctx := t.Context()
+
+		// Create multiple local branches
+		if err := repo.SetBranch(ctx, "feature/branch-a"); err != nil {
+			t.Fatalf("SetBranch feature/branch-a failed: %v", err)
+		}
+		if err := repo.SetBranch(ctx, "feature/branch-b"); err != nil {
+			t.Fatalf("SetBranch feature/branch-b failed: %v", err)
+		}
+
+		branches, err := repo.ListBranches(ctx)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+
+		// Should contain both local branches
+		expectedBranches := []string{"feature/branch-a", "feature/branch-b"}
+		for _, expected := range expectedBranches {
+			found := false
+			for _, b := range branches {
+				if b == expected {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected branch %q in list %v", expected, branches)
+			}
+		}
+	})
+
+	t.Run("returns remote branches", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newLocalRepoFixture(t)
+		ctx := t.Context()
+
+		// Create a branch on the remote by using another clone
+		cloneDir, err := os.MkdirTemp(os.TempDir(), "*-clone-repo")
+		if err != nil {
+			t.Fatalf("failed to create clone dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(cloneDir) })
+
+		cmd := exec.Command("git", "clone", repo.remote, cloneDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git clone failed: %v\n%s", err, out)
+		}
+
+		runGit(t, cloneDir, "config", "user.email", "test@test.com")
+		runGit(t, cloneDir, "config", "user.name", "Test User")
+
+		// Create and push a new branch from the clone
+		runGit(t, cloneDir, "checkout", "-b", "feature/remote-branch")
+		remoteFile := filepath.Join(cloneDir, "remote-file.txt")
+		if err := os.WriteFile(remoteFile, []byte("remote content"), 0o644); err != nil {
+			t.Fatalf("write remote file failed: %v", err)
+		}
+		runGit(t, cloneDir, "add", "remote-file.txt")
+		runGit(t, cloneDir, "commit", "-m", "commit on remote branch")
+		runGit(t, cloneDir, "push", "-u", "origin", "feature/remote-branch")
+
+		// Fetch to update remote refs in our repo
+		runGit(t, repo.path, "fetch", "origin")
+
+		branches, err := repo.ListBranches(ctx)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+
+		// Should contain the remote branch (either as origin/feature/remote-branch or feature/remote-branch)
+		found := false
+		for _, b := range branches {
+			if strings.Contains(b, "feature/remote-branch") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected remote branch containing 'feature/remote-branch' in list %v", branches)
+		}
+	})
+
+	t.Run("returns main branch", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newLocalRepoFixture(t)
+		ctx := t.Context()
+
+		branches, err := repo.ListBranches(ctx)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+
+		found := false
+		for _, b := range branches {
+			if b == "main" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected 'main' branch in list %v", branches)
+		}
+	})
+
+	t.Run("does not return duplicates for tracked branches", func(t *testing.T) {
+		t.Parallel()
+		repo, _, _ := newLocalRepoFixture(t)
+		ctx := t.Context()
+
+		branches, err := repo.ListBranches(ctx)
+		if err != nil {
+			t.Fatalf("ListBranches failed: %v", err)
+		}
+
+		// Count occurrences of "main"
+		mainCount := 0
+		for _, b := range branches {
+			if b == "main" {
+				mainCount++
+			}
+		}
+		if mainCount > 1 {
+			t.Fatalf("expected 'main' to appear at most once, but found %d times in %v", mainCount, branches)
+		}
+	})
+}
+
 func TestRepositoryGetFile(t *testing.T) {
 	t.Parallel()
 	repo, fileName, content := newRepoFixture(t)
