@@ -9,14 +9,17 @@ import (
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/tools"
+	"github.com/ansg191/job-temporal/internal/workflows/agents"
 )
 
 func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage("You are a helpful assistant. " +
-			"Use read_file to read a file. Use edit_file to edit a file. Do not call edit_file unnecessarily (if no change required)." +
-			"Call build tool to compile the resume to check for errors. Always build and check for errors"),
-		openai.UserMessage(input),
+		//openai.SystemMessage("You are a helpful assistant. " +
+		//	"Use read_file to read a file. Use edit_file to edit a file. Do not call edit_file unnecessarily (if no change required)." +
+		//	"Call build tool to compile the resume to check for errors. Always build and check for errors"),
+		//openai.UserMessage(input),
+		openai.SystemMessage(agents.ResumeBuilderInstructions),
+		openai.UserMessage("Job Application:\n" + input),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -35,6 +38,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				Tools: []openai.ChatCompletionToolUnionParam{
 					tools.ReadFileToolDesc,
 					tools.EditFileToolDesc,
+					tools.EditLineToolDesc,
 					tools.BuildToolDesc,
 				},
 			},
@@ -57,7 +61,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				switch name {
 				case tools.ReadFileToolDesc.OfFunction.Function.Name:
 					req := activities.ReadFileRequest{
-						AllowList:  []string{"person.typ", "projects.typ"},
+						AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ", "resume.typ"},
 						RepoRemote: remote,
 						Branch:     "abc",
 					}
@@ -71,7 +75,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				case tools.EditFileToolDesc.OfFunction.Function.Name:
 					req := activities.EditFileRequest{
 						ReadFileRequest: activities.ReadFileRequest{
-							AllowList:  []string{"person.typ", "projects.typ"},
+							AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ"},
 							RepoRemote: remote,
 							Branch:     "abc",
 						},
@@ -83,6 +87,21 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 					}
 
 					futs[i] = workflow.ExecuteActivity(ctx, activities.EditFile, req)
+				case tools.EditLineToolDesc.OfFunction.Function.Name:
+					req := activities.EditLineRequest{
+						ReadFileRequest: activities.ReadFileRequest{
+							AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ"},
+							RepoRemote: remote,
+							Branch:     "abc",
+						},
+					}
+					err = tools.EditLineToolParseArgs(args, &req)
+					if err != nil {
+						messages = append(messages, openai.ToolMessage(err.Error(), call.ID))
+						continue
+					}
+
+					futs[i] = workflow.ExecuteActivity(ctx, activities.EditLine, req)
 				case tools.BuildToolDesc.OfFunction.Function.Name:
 					req := activities.BuildRequest{
 						RepoRemote: remote,

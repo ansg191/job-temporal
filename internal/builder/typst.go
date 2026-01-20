@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -65,6 +66,7 @@ func (t *typstBuilder) Build(ctx context.Context, path string) (*BuildResult, er
 
 	// Run command and capture output
 	cmd := exec.CommandContext(ctx, t.execPath, "compile", t.rootFile, outFile.Name(), "--root", path, "--diagnostic-format=short")
+	slog.InfoContext(ctx, "Running typst command", "cmd", cmd.String())
 	output, err := cmd.CombinedOutput()
 
 	// Parse errors from output
@@ -84,6 +86,7 @@ func (t *typstBuilder) Build(ctx context.Context, path string) (*BuildResult, er
 		if err != nil {
 			return nil, fmt.Errorf("failed to count PDF pages: %w", err)
 		}
+		slog.DebugContext(ctx, "PDF page count", "count", pageCount, "limit", t.pageLimit)
 		if pageCount > t.pageLimit {
 			return &BuildResult{
 				Success: false,

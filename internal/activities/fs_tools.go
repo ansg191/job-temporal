@@ -79,3 +79,44 @@ func EditFile(ctx context.Context, req EditFileRequest) (string, error) {
 
 	return "Success", nil
 }
+
+type EditLineRequest struct {
+	ReadFileRequest
+	StartLine  int
+	EndLine    int
+	NewContent string
+	Message    string
+}
+
+func EditLine(ctx context.Context, req EditLineRequest) (string, error) {
+	// Check that file is in the allowlist
+	if !slices.Contains(req.AllowList, req.Path) {
+		return "File not allowed to be edited", nil
+	}
+
+	// Clone the repository
+	repo, err := git.NewGitRepo(ctx, req.RepoRemote)
+	if err != nil {
+		return "", err
+	}
+	defer repo.Close()
+
+	// Checkout the branch
+	if err = repo.SetBranch(ctx, req.Branch); err != nil {
+		return "", err
+	}
+
+	// Get HEAD commit
+	head, err := repo.GetHeadCommit(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	// Edit the file by lines
+	_, err = repo.EditFileByLines(ctx, head, req.Path, req.StartLine, req.EndLine, req.NewContent, req.Message)
+	if err != nil {
+		return err.Error(), nil
+	}
+
+	return "Success", nil
+}

@@ -25,6 +25,7 @@ func main() {
 	w.RegisterActivity(activities.CallAI)
 	w.RegisterActivity(activities.ReadFile)
 	w.RegisterActivity(activities.EditFile)
+	w.RegisterActivity(activities.EditLine)
 	w.RegisterActivity(activities.Build)
 
 	err = w.Run(worker.InterruptCh())

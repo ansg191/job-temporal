@@ -353,3 +353,144 @@ func (r *Repository) EditFile(ctx context.Context, commitID, patch, msg string) 
 
 	return newHead, nil
 }
+
+// EditFileByLines edits a file by replacing lines in a range with new content.
+// Line numbers are 1-indexed and inclusive.
+// Special cases:
+//   - startLine == endLine: replace single line
+//   - startLine < endLine: replace range
+//   - endLine == startLine - 1: insert before startLine (endLine < startLine)
+//   - empty newContent: delete lines
+func (r *Repository) EditFileByLines(ctx context.Context, commitID, filePath string, startLine, endLine int, newContent, msg string) (string, error) {
+	commitID = strings.TrimSpace(commitID)
+	filePath = strings.TrimSpace(filePath)
+	msg = strings.TrimSpace(msg)
+
+	if commitID == "" {
+		return "", fmt.Errorf("commit ID is required")
+	}
+	if filePath == "" {
+		return "", fmt.Errorf("file path is required")
+	}
+	if startLine < 1 {
+		return "", fmt.Errorf("start_line must be >= 1")
+	}
+	if endLine < startLine-1 {
+		return "", fmt.Errorf("end_line must be >= start_line - 1")
+	}
+	if msg == "" {
+		return "", fmt.Errorf("commit message is required")
+	}
+
+	// Step 1: Pull the latest changes from the remote
+	if err := r.pullBranch(ctx); err != nil {
+		return "", fmt.Errorf("failed to pull latest changes: %w", err)
+	}
+
+	// Step 2: Verify that the previous commit SHA is an ancestor of HEAD
+	headCommit, err := r.GetHeadCommit(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get HEAD commit: %w", err)
+	}
+
+	if headCommit != commitID {
+		verifyCmd := r.gitCmd(ctx, "merge-base", "--is-ancestor", commitID, headCommit)
+		if err := verifyCmd.Run(); err != nil {
+			return "", fmt.Errorf("commit %s is not an ancestor of HEAD %s, cannot safely edit", commitID, headCommit)
+		}
+	}
+
+	// Step 3: Read file, split into lines, replace lines[startLine-1:endLine] with newContent
+	fullPath := filepath.Join(r.path, filePath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Validate line numbers against file
+	if startLine > len(lines)+1 {
+		return "", fmt.Errorf("start_line %d exceeds file length %d", startLine, len(lines))
+	}
+
+	// Build new content
+	var newLines []string
+
+	// Add lines before the edit range
+	if startLine > 1 {
+		newLines = append(newLines, lines[:startLine-1]...)
+	}
+
+	// Add new content (if not empty)
+	if newContent != "" {
+		newContentLines := strings.Split(newContent, "\n")
+		newLines = append(newLines, newContentLines...)
+	}
+
+	// Add lines after the edit range
+	if endLine < len(lines) {
+		newLines = append(newLines, lines[endLine:]...)
+	}
+
+	// Write file back
+	newFileContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(fullPath, []byte(newFileContent), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file %s: %w", filePath, err)
+	}
+
+	// Step 4: Stage the file with git add
+	addCmd := r.gitCmd(ctx, "add", filePath)
+	var addStderr bytes.Buffer
+	addCmd.Stderr = &addStderr
+
+	if err := addCmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(addStderr.String()); errMsg != "" {
+			return "", fmt.Errorf("git add failed: %s: %w", errMsg, err)
+		}
+		return "", fmt.Errorf("git add failed: %w", err)
+	}
+
+	// Step 5: Commit with message
+	commitCmd := r.gitCmd(ctx, "commit", "-m", msg)
+	commitCmd.Env = append(commitCmd.Env,
+		"GIT_AUTHOR_NAME="+gitAuthorName,
+		"GIT_AUTHOR_EMAIL="+gitAuthorEmail,
+		"GIT_COMMITTER_NAME="+gitAuthorName,
+		"GIT_COMMITTER_EMAIL="+gitAuthorEmail,
+	)
+	var commitStderr bytes.Buffer
+	commitCmd.Stderr = &commitStderr
+
+	if err := commitCmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(commitStderr.String()); errMsg != "" {
+			return "", fmt.Errorf("git commit failed: %s: %w", errMsg, err)
+		}
+		return "", fmt.Errorf("git commit failed: %w", err)
+	}
+
+	// Step 6: Push branch to remote
+	branch, err := r.GetBranch(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	pushCmd := r.gitCmd(ctx, "push", "origin", branch)
+	var pushStderr bytes.Buffer
+	pushCmd.Stderr = &pushStderr
+
+	if err := pushCmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(pushStderr.String()); errMsg != "" {
+			return "", fmt.Errorf("git push failed: %s: %w", errMsg, err)
+		}
+		return "", fmt.Errorf("git push failed: %w", err)
+	}
+
+	// Step 7: Return the new HEAD commit SHA
+	newHead, err := r.GetHeadCommit(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get new HEAD commit: %w", err)
+	}
+
+	return newHead, nil
+}
