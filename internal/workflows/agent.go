@@ -13,6 +13,12 @@ import (
 )
 
 func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
+	var branchName string
+	err := workflow.ExecuteChildWorkflow(ctx, agents.BranchNameAgent, remote, input).Get(ctx, &branchName)
+	if err != nil {
+		return "", err
+	}
+
 	messages := []openai.ChatCompletionMessageParamUnion{
 		//openai.SystemMessage("You are a helpful assistant. " +
 		//	"Use read_file to read a file. Use edit_file to edit a file. Do not call edit_file unnecessarily (if no change required)." +
@@ -63,7 +69,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 					req := activities.ReadFileRequest{
 						AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ", "resume.typ"},
 						RepoRemote: remote,
-						Branch:     "abc",
+						Branch:     branchName,
 					}
 					err = tools.ReadToolParseArgs(args, &req)
 					if err != nil {
@@ -77,7 +83,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 						ReadFileRequest: activities.ReadFileRequest{
 							AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ"},
 							RepoRemote: remote,
-							Branch:     "abc",
+							Branch:     branchName,
 						},
 					}
 					err = tools.EditToolParseArgs(args, &req)
@@ -92,7 +98,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 						ReadFileRequest: activities.ReadFileRequest{
 							AllowList:  []string{"person.typ", "projects.typ", "jobs.typ", "school.typ"},
 							RepoRemote: remote,
-							Branch:     "abc",
+							Branch:     branchName,
 						},
 					}
 					err = tools.EditLineToolParseArgs(args, &req)
@@ -105,7 +111,7 @@ func AgentWorkflow(ctx workflow.Context, remote, input string) (string, error) {
 				case tools.BuildToolDesc.OfFunction.Function.Name:
 					req := activities.BuildRequest{
 						RepoRemote: remote,
-						Branch:     "abc",
+						Branch:     branchName,
 						Builder:    "typst",
 					}
 					futs[i] = workflow.ExecuteActivity(ctx, activities.Build, req)

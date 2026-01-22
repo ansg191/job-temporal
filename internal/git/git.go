@@ -99,24 +99,33 @@ func (r *Repository) GetBranch(ctx context.Context) (string, error) {
 	return branch, nil
 }
 
-// ListBranches lists all local and remote branches in the repository
+// ListBranches lists all branches on the remote repository.
+// Uses git ls-remote to query the remote directly, which works correctly
+// even with shallow clones (--depth 1).
 func (r *Repository) ListBranches(ctx context.Context) ([]string, error) {
-	cmd := r.gitCmd(ctx, "branch", "-a")
+	cmd := r.gitCmd(ctx, "ls-remote", "--heads", r.remote)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
 		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
-			return nil, fmt.Errorf("git branch -a failed: %s: %w", errMsg, err)
+			return nil, fmt.Errorf("git ls-remote failed: %s: %w", errMsg, err)
 		}
-		return nil, fmt.Errorf("git branch -a failed: %w", err)
+		return nil, fmt.Errorf("git ls-remote failed: %w", err)
 	}
 
 	var branches []string
 	for _, line := range strings.Split(stdout.String(), "\n") {
-		branch := strings.TrimSpace(strings.TrimPrefix(line, "*"))
-		if branch != "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: <sha>\trefs/heads/<branch>
+		parts := strings.Split(line, "\t")
+		if len(parts) == 2 {
+			ref := parts[1]
+			branch := strings.TrimPrefix(ref, "refs/heads/")
 			branches = append(branches, branch)
 		}
 	}
@@ -137,47 +146,45 @@ func (r *Repository) SetBranch(ctx context.Context, branch string) error {
 	verifyLocal.Stderr = &verifyLocalErr
 	localBranchExists := verifyLocal.Run() == nil
 
+	// Check if remote branch exists
+	// Use ls-remote with the actual remote URL (more reliable than "origin" alias)
+	checkRemoteCmd := r.gitCmd(ctx, "ls-remote", "--heads", r.remote)
+	var checkRemoteOut bytes.Buffer
+	checkRemoteCmd.Stdout = &checkRemoteOut
+	checkRemoteErr := checkRemoteCmd.Run()
+
+	// Look for refs/heads/<branch> in the output
+	remoteBranchExists := false
+	expectedRef := fmt.Sprintf("refs/heads/%s", branch)
+	if checkRemoteErr == nil {
+		for _, line := range strings.Split(checkRemoteOut.String(), "\n") {
+			if strings.HasSuffix(strings.TrimSpace(line), expectedRef) {
+				remoteBranchExists = true
+				break
+			}
+		}
+	}
+
 	var cmd *exec.Cmd
 	if localBranchExists {
 		// Local branch exists, just checkout
 		cmd = r.gitCmd(ctx, "checkout", branch)
+	} else if remoteBranchExists {
+		// Fetch the branch (this populates FETCH_HEAD)
+		fetchCmd := r.gitCmd(ctx, "fetch", "--depth", "1", "origin", branch)
+		var fetchStderr bytes.Buffer
+		fetchCmd.Stderr = &fetchStderr
+		if err := fetchCmd.Run(); err != nil {
+			if errMsg := strings.TrimSpace(fetchStderr.String()); errMsg != "" {
+				return fmt.Errorf("git fetch failed: %s: %w", errMsg, err)
+			}
+			return fmt.Errorf("git fetch failed: %w", err)
+		}
+		// Checkout from FETCH_HEAD with force to ensure working tree is updated
+		cmd = r.gitCmd(ctx, "checkout", "-f", "-B", branch, "FETCH_HEAD")
 	} else {
-		// Local branch doesn't exist, check if remote branch exists
-		// Use ls-remote with the actual remote URL (more reliable than "origin" alias)
-		checkRemoteCmd := r.gitCmd(ctx, "ls-remote", "--heads", r.remote)
-		var checkRemoteOut bytes.Buffer
-		checkRemoteCmd.Stdout = &checkRemoteOut
-		checkRemoteErr := checkRemoteCmd.Run()
-
-		// Look for refs/heads/<branch> in the output
-		remoteBranchExists := false
-		expectedRef := fmt.Sprintf("refs/heads/%s", branch)
-		if checkRemoteErr == nil {
-			for _, line := range strings.Split(checkRemoteOut.String(), "\n") {
-				if strings.HasSuffix(strings.TrimSpace(line), expectedRef) {
-					remoteBranchExists = true
-					break
-				}
-			}
-		}
-
-		if remoteBranchExists {
-			// Fetch the branch (this populates FETCH_HEAD)
-			fetchCmd := r.gitCmd(ctx, "fetch", "--depth", "1", "origin", branch)
-			var fetchStderr bytes.Buffer
-			fetchCmd.Stderr = &fetchStderr
-			if err := fetchCmd.Run(); err != nil {
-				if errMsg := strings.TrimSpace(fetchStderr.String()); errMsg != "" {
-					return fmt.Errorf("git fetch failed: %s: %w", errMsg, err)
-				}
-				return fmt.Errorf("git fetch failed: %w", err)
-			}
-			// Checkout from FETCH_HEAD with force to ensure working tree is updated
-			cmd = r.gitCmd(ctx, "checkout", "-f", "-B", branch, "FETCH_HEAD")
-		} else {
-			// Neither local nor remote branch exists, create new branch
-			cmd = r.gitCmd(ctx, "checkout", "-b", branch)
-		}
+		// Neither local nor remote branch exists, create new branch
+		cmd = r.gitCmd(ctx, "checkout", "-b", branch)
 	}
 
 	var stderr bytes.Buffer
@@ -188,6 +195,20 @@ func (r *Repository) SetBranch(ctx context.Context, branch string) error {
 			return fmt.Errorf("git checkout failed: %s: %w", errMsg, err)
 		}
 		return fmt.Errorf("git checkout failed: %w", err)
+	}
+
+	// If we created a new branch (neither local nor remote existed), push it to remote
+	if !localBranchExists && !remoteBranchExists {
+		pushCmd := r.gitCmd(ctx, "push", "-u", "origin", branch)
+		var pushStderr bytes.Buffer
+		pushCmd.Stderr = &pushStderr
+
+		if err := pushCmd.Run(); err != nil {
+			if errMsg := strings.TrimSpace(pushStderr.String()); errMsg != "" {
+				return fmt.Errorf("git push failed: %s: %w", errMsg, err)
+			}
+			return fmt.Errorf("git push failed: %w", err)
+		}
 	}
 
 	return nil
