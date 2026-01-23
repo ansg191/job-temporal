@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -41,7 +40,7 @@ AVAILABLE TOOLS:
 - build(): Compile the resume and perform various checks
 `
 
-func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input string) (string, error) {
+func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input string) (int, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(ResumeBuilderInstructions),
 		openai.UserMessage("Remote: " + owner + "/" + repo),
@@ -57,7 +56,7 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 	var aiTools []openai.ChatCompletionToolUnionParam
 	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 
 	for {
@@ -72,11 +71,8 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 			},
 		).Get(ctx, &result)
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-
-		js, _ := json.Marshal(result)
-		workflow.GetLogger(ctx).Info("AI response", "result", string(js))
 
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
@@ -120,7 +116,14 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 				messages = append(messages, res)
 			}
 		} else {
-			return result.Choices[0].Message.Content, nil
+			// Activate PR Builder workflow
+			var prNum int
+			err := workflow.ExecuteChildWorkflow(ctx, PullRequestAgent, owner, repo, branchName, input).Get(ctx, &prNum)
+			if err != nil {
+				return 0, err
+			}
+
+			return prNum, nil
 		}
 	}
 }

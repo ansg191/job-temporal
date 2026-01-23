@@ -1,6 +1,8 @@
 package workflows
 
 import (
+	"strconv"
+
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
@@ -13,10 +15,11 @@ func AgentWorkflow(ctx workflow.Context, owner, repo string, input string) (stri
 		return "", err
 	}
 
-	var message string
-	err = workflow.ExecuteChildWorkflow(ctx, agents.ResumeBuilderWorkflow, owner, repo, branchName, input).Get(ctx, &message)
+	var pr int
+	err = workflow.ExecuteChildWorkflow(ctx, agents.ResumeBuilderWorkflow, owner, repo, branchName, input).Get(ctx, &pr)
 	if err != nil {
 		return "", err
 	}
-	return message, nil
+
+	return strconv.Itoa(pr), nil
 }

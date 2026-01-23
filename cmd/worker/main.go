@@ -23,6 +23,7 @@ func main() {
 	w.RegisterWorkflow(workflows.SayHelloWorkflow)
 	w.RegisterWorkflow(agents.BranchNameAgent)
 	w.RegisterWorkflow(agents.ResumeBuilderWorkflow)
+	w.RegisterWorkflow(agents.PullRequestAgent)
 	w.RegisterActivity(activities.Greet)
 	w.RegisterWorkflow(workflows.AgentWorkflow)
 	w.RegisterActivity(activities.CallAI)
