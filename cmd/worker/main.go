@@ -22,6 +22,7 @@ func main() {
 
 	w.RegisterWorkflow(workflows.SayHelloWorkflow)
 	w.RegisterWorkflow(agents.BranchNameAgent)
+	w.RegisterWorkflow(agents.ResumeBuilderWorkflow)
 	w.RegisterActivity(activities.Greet)
 	w.RegisterWorkflow(workflows.AgentWorkflow)
 	w.RegisterActivity(activities.CallAI)
@@ -31,6 +32,8 @@ func main() {
 	w.RegisterActivity(activities.Build)
 	w.RegisterActivity(activities.ListBranches)
 	w.RegisterActivity(activities.CreateBranch)
+	w.RegisterActivity(activities.ListGithubTools)
+	w.RegisterActivity(activities.CallGithubTool)
 
 	err = w.Run(worker.InterruptCh())
 	if err != nil {

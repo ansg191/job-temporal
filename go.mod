@@ -3,6 +3,9 @@ module github.com/ansg191/job-temporal
 go 1.25.5
 
 require (
+	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
+	github.com/google/go-github/v81 v81.0.0
+	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/pdfcpu/pdfcpu v0.11.1
 	go.temporal.io/sdk v1.39.0
@@ -13,7 +16,11 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
+	github.com/google/go-github/v75 v75.0.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
+	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
@@ -31,10 +38,12 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.temporal.io/api v1.59.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/image v0.32.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect

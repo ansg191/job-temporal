@@ -4,9 +4,11 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/tools"
 )
 
@@ -29,18 +31,20 @@ OUTPUT FORMAT:
 Respond with only the branch name as a single string, without any additional text or formatting.
 `
 
-func BranchNameAgent(ctx workflow.Context, remote, jobDescription string) (string, error) {
+func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (string, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(branchNameAgentInstructions),
 		openai.UserMessage("Job Description:\n" + jobDescription),
 	}
 
 	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 10 * time.Second,
+		StartToCloseTimeout: 30 * time.Second,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	for {
+	ghOpts := github.ClientOptions{Owner: owner, Repo: repo}
+
+	for range 5 {
 		var result *openai.ChatCompletion
 		err := workflow.ExecuteActivity(
 			ctx,
@@ -68,7 +72,7 @@ func BranchNameAgent(ctx workflow.Context, remote, jobDescription string) (strin
 
 				switch name {
 				case tools.ListBranchesToolDesc.OfFunction.Function.Name:
-					req := activities.ListBranchesRequest{RepoRemote: remote}
+					req := activities.ListBranchesRequest{ClientOptions: ghOpts}
 					futs[i] = workflow.ExecuteActivity(ctx, activities.ListBranches, req)
 				}
 			}
@@ -88,7 +92,11 @@ func BranchNameAgent(ctx workflow.Context, remote, jobDescription string) (strin
 		} else {
 			branchName := result.Choices[0].Message.Content
 
-			err = workflow.ExecuteActivity(ctx, activities.CreateBranch, remote, branchName).Get(ctx, nil)
+			req := activities.CreateBranchRequest{
+				ClientOptions: ghOpts,
+				Branch:        branchName,
+			}
+			err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
 			if err != nil {
 				messages = append(messages, openai.UserMessage("Unable to create branch: "+err.Error()+"\n"))
 				continue
@@ -96,4 +104,6 @@ func BranchNameAgent(ctx workflow.Context, remote, jobDescription string) (strin
 			return branchName, nil
 		}
 	}
+
+	return "", temporal.NewNonRetryableApplicationError("failed to generate branch name", "BranchNameError", nil)
 }

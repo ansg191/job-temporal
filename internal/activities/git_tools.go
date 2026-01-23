@@ -6,47 +6,44 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/ansg191/job-temporal/internal/git"
+	"github.com/ansg191/job-temporal/internal/github"
 )
 
 type ListBranchesRequest struct {
-	RepoRemote string `json:"repoRemote"`
+	github.ClientOptions
 }
 
 func ListBranches(ctx context.Context, req ListBranchesRequest) (string, error) {
-	// Clone the repository
-	repo, err := git.NewGitRepo(ctx, req.RepoRemote)
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return "", temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	branches, err := client.ListBranches(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer repo.Close()
-
-	// List branches
-	branches, err := repo.ListBranches(ctx)
-	if err != nil {
-		return "", err
-	}
-
 	return strings.Join(branches, ", "), nil
 }
 
-func CreateBranch(ctx context.Context, remote string, branch string) error {
-	repo, err := git.NewGitRepo(ctx, remote)
-	if err != nil {
-		return err
-	}
-	defer repo.Close()
+type CreateBranchRequest struct {
+	github.ClientOptions
+	Branch string
+}
 
-	// Check if branch already exists
-	branches, err := repo.ListBranches(ctx)
+func CreateBranch(ctx context.Context, req CreateBranchRequest) error {
+	client, err := github.NewClient(req.ClientOptions)
 	if err != nil {
-		return err
-	}
-	for _, b := range branches {
-		if b == branch {
-			return temporal.NewNonRetryableApplicationError("branch already exists", "BranchExistsError", nil)
-		}
+		return temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
 	}
 
-	return repo.SetBranch(ctx, branch)
+	return client.CreateBranch(ctx, req.Branch)
 }

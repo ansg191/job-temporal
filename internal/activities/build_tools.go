@@ -6,17 +6,29 @@ import (
 
 	"github.com/ansg191/job-temporal/internal/builder"
 	"github.com/ansg191/job-temporal/internal/git"
+	"github.com/ansg191/job-temporal/internal/github"
 )
 
 type BuildRequest struct {
-	RepoRemote string `json:"repoRemote"`
-	Branch     string `json:"branch"`
-	Builder    string `json:"builder"`
+	github.ClientOptions
+	Branch  string `json:"branch"`
+	Builder string `json:"builder"`
 }
 
 func Build(ctx context.Context, req BuildRequest) (string, error) {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return "", err
+	}
+
+	// Construct a remote URL with GitHub App authentication
+	repoRemote, err := client.GetAuthenticatedRemoteURL(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	// Clone the repository
-	repo, err := git.NewGitRepo(ctx, req.RepoRemote)
+	repo, err := git.NewGitRepo(ctx, repoRemote)
 	if err != nil {
 		return "", err
 	}

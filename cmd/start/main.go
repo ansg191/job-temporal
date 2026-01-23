@@ -23,7 +23,7 @@ func main() {
 	}
 
 	log.Println("Starting workflow", os.Args[1])
-	we, err := c.ExecuteWorkflow(context.Background(), options, workflows.AgentWorkflow, os.Getenv("REMOTE"), os.Args[1])
+	we, err := c.ExecuteWorkflow(context.Background(), options, workflows.AgentWorkflow, "ansg191", "resume", os.Args[1])
 	if err != nil {
 		log.Fatalln("Unable to execute workflow", err)
 	}

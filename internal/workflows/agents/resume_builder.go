@@ -1,12 +1,16 @@
 package agents
 
 import (
+	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/openai/openai-go/v3"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/tools"
 )
 
 const ResumeBuilderInstructions = `
@@ -27,31 +31,34 @@ template to build the resume.
 	- jobs.typ: Information about professional experience
 	- school.typ: Information about educational background
 	- projects.typ: Information about personal projects
-	- resume.typ: Resume formatting file that pulls info from other files. You can read this file for context, but cannot edit it.
+	- resume.typ: Resume formatting file that pulls info from other files. You can read this file for context, but do NOT edit it.
 - The Resume MUST be under 1 page. This will be checked by the build tool.
+- Only work in in the repository provided
+- Only work in the branch provided
 
 AVAILABLE TOOLS:
-- read_file(<file>): Read the contents of a file.
-- edit_line(<file>, <start_line>, <end_line>, <new_content>, <message>): Edit lines in a file.
-  - Line numbers are 1-indexed
-  - To replace line 5: start_line=5, end_line=5
-  - To replace lines 5-7: start_line=5, end_line=7
-  - To insert before line 5: start_line=5, end_line=4
-  - To delete lines: use empty new_content
+- Github MCP tools to read and edit files in the applicant's resume repository.
 - build(): Compile the resume and perform various checks
 `
 
-func ResumeBuilderWorkflow(ctx workflow.Context, job, applicant string) error {
+func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input string) (string, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(ResumeBuilderInstructions),
-		openai.UserMessage("Job Application:\n" + job),
-		openai.UserMessage("Applicant:\n" + applicant),
+		openai.UserMessage("Remote: " + owner + "/" + repo),
+		openai.UserMessage("Branch Name: " + branchName),
+		openai.UserMessage("Job Application:\n" + input),
 	}
 
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: time.Second * 30,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	var aiTools []openai.ChatCompletionToolUnionParam
+	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
+	if err != nil {
+		return "", err
+	}
 
 	for {
 		var result *openai.ChatCompletion
@@ -61,32 +68,59 @@ func ResumeBuilderWorkflow(ctx workflow.Context, job, applicant string) error {
 			activities.OpenAIResponsesRequest{
 				Model:    openai.ChatModelGPT5_2,
 				Messages: messages,
-				Tools:    nil,
+				Tools:    append(aiTools, tools.BuildToolDesc),
 			},
 		).Get(ctx, &result)
 		if err != nil {
-			return err
+			return "", err
 		}
+
+		js, _ := json.Marshal(result)
+		workflow.GetLogger(ctx).Info("AI response", "result", string(js))
 
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			results, err := CallTools(ctx, result.Choices[0].Message.ToolCalls)
-			if err != nil {
-				return err
+			futs := make([]workflow.Future, len(result.Choices[0].Message.ToolCalls))
+			for i, call := range result.Choices[0].Message.ToolCalls {
+				name := call.Function.Name
+				//args := call.Function.Arguments
+
+				if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+					tName := param.GetFunction().Name
+					return tName == name
+				}) {
+					futs[i] = workflow.ExecuteActivity(ctx, activities.CallGithubTool, call)
+					continue
+				}
+
+				switch name {
+				case tools.BuildToolDesc.OfFunction.Function.Name:
+					req := activities.BuildRequest{
+						ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
+						Branch:        branchName,
+						Builder:       "typst",
+					}
+					futs[i] = workflow.ExecuteActivity(ctx, activities.Build, req)
+				default:
+					messages = append(messages, openai.ToolMessage("Unsupported tool: "+name, call.ID))
+				}
 			}
-			messages = append(messages, results...)
+
+			for i, fut := range futs {
+				if fut == nil {
+					continue
+				}
+
+				res, err := tools.GetToolResult(ctx, fut, result.Choices[0].Message.ToolCalls[i].ID)
+				if err != nil {
+					messages = append(messages, openai.ToolMessage(err.Error(), result.Choices[0].Message.ToolCalls[i].ID))
+					continue
+				}
+				messages = append(messages, res)
+			}
 		} else {
-			break
+			return result.Choices[0].Message.Content, nil
 		}
 	}
-
-	return nil
-}
-
-func CallTools(
-	ctx workflow.Context,
-	call []openai.ChatCompletionMessageToolCallUnion,
-) ([]openai.ChatCompletionMessageParamUnion, error) {
-	return nil, nil
 }
