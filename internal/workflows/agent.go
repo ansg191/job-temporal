@@ -5,6 +5,7 @@ import (
 
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
 )
 
@@ -17,6 +18,18 @@ func AgentWorkflow(ctx workflow.Context, owner, repo string, input string) (stri
 
 	var pr int
 	err = workflow.ExecuteChildWorkflow(ctx, agents.ResumeBuilderWorkflow, owner, repo, branchName, input).Get(ctx, &pr)
+	if err != nil {
+		return "", err
+	}
+
+	err = workflow.ExecuteChildWorkflow(ctx, agents.ReviewAgent, agents.ReviewAgentArgs{
+		Repo: github.ClientOptions{
+			Owner: owner,
+			Repo:  repo,
+		},
+		Pr:         pr,
+		BranchName: branchName,
+	}).Get(ctx, &pr)
 	if err != nil {
 		return "", err
 	}

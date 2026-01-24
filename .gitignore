@@ -1,3 +1,8 @@
+job*.txt
+config.yaml
+*.pem
+.idea/
+
 # Created by https://www.toptal.com/developers/gitignore/api/go,macos,windows,linux,intellij+all,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,macos,windows,linux,intellij+all,visualstudiocode
 

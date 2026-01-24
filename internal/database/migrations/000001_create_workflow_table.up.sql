@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS workflows(
+    workflow_id VARCHAR(255) PRIMARY KEY,
+    pull_request_id INTEGER NOT NULL UNIQUE,
+    finished BOOLEAN NOT NULL DEFAULT FALSE
+);

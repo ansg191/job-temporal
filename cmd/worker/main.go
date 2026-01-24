@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/database"
 	"github.com/ansg191/job-temporal/internal/workflows"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
 
@@ -12,6 +13,10 @@ import (
 )
 
 func main() {
+	if err := database.EnsureMigrations(); err != nil {
+		log.Fatalln("Unable to ensure database migrations", err)
+	}
+
 	c, err := client.Dial(client.Options{})
 	if err != nil {
 		log.Fatalln("Unable to create client", err)
@@ -24,6 +29,7 @@ func main() {
 	w.RegisterWorkflow(agents.BranchNameAgent)
 	w.RegisterWorkflow(agents.ResumeBuilderWorkflow)
 	w.RegisterWorkflow(agents.PullRequestAgent)
+	w.RegisterWorkflow(agents.ReviewAgent)
 	w.RegisterActivity(activities.Greet)
 	w.RegisterWorkflow(workflows.AgentWorkflow)
 	w.RegisterActivity(activities.CallAI)
@@ -35,6 +41,8 @@ func main() {
 	w.RegisterActivity(activities.CreateBranch)
 	w.RegisterActivity(activities.ListGithubTools)
 	w.RegisterActivity(activities.CallGithubTool)
+	w.RegisterActivity(activities.RegisterReviewReadyPR)
+	w.RegisterActivity(activities.FinishReview)
 
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
