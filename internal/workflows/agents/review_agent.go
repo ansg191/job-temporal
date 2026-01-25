@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"time"
@@ -122,51 +123,42 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 
 			messages = append(messages, result.Choices[0].Message.ToParam())
 
-			if result.Choices[0].FinishReason == "tool_calls" {
-				futs := make([]workflow.Future, len(result.Choices[0].Message.ToolCalls))
-				for i, call := range result.Choices[0].Message.ToolCalls {
-					name := call.Function.Name
-					//args := call.Function.Arguments
-
-					if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-						tName := param.GetFunction().Name
-						return tName == name
-					}) {
-						futs[i] = workflow.ExecuteActivity(ctx, activities.CallGithubTool, call)
-						continue
-					}
-
-					switch name {
-					case tools.BuildToolDesc.OfFunction.Function.Name:
-						req := activities.BuildRequest{
-							ClientOptions: args.Repo,
-							Branch:        args.BranchName,
-							Builder:       "typst",
-						}
-						futs[i] = workflow.ExecuteActivity(ctx, activities.Build, req)
-					default:
-						messages = append(messages, openai.ToolMessage("Unsupported tool: "+name, call.ID))
-					}
-				}
-
-				for i, fut := range futs {
-					if fut == nil {
-						continue
-					}
-
-					res, err := tools.GetToolResult(ctx, fut, result.Choices[0].Message.ToolCalls[i].ID)
-					if err != nil {
-						messages = append(messages, openai.ToolMessage(err.Error(), result.Choices[0].Message.ToolCalls[i].ID))
-						continue
-					}
-					messages = append(messages, res)
-				}
-			} else {
+			if result.Choices[0].FinishReason != "tool_calls" {
 				break
 			}
+
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls,
+				reviewAgentDispatcher(aiTools, args.Repo, args.BranchName))
+			messages = append(messages, toolMsgs...)
 		}
 	}
 
 	// Mark PR as finished
 	return workflow.ExecuteActivity(ctx, activities.FinishReview, args.Pr).Get(ctx, nil)
+}
+
+func reviewAgentDispatcher(
+	aiTools []openai.ChatCompletionToolUnionParam,
+	ghOpts github.ClientOptions,
+	branchName string,
+) tools.ToolDispatcher {
+	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+		if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+			return param.GetFunction().Name == call.Function.Name
+		}) {
+			return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
+		}
+
+		switch call.Function.Name {
+		case tools.BuildToolDesc.OfFunction.Function.Name:
+			req := activities.BuildRequest{
+				ClientOptions: ghOpts,
+				Branch:        branchName,
+				Builder:       "typst",
+			}
+			return workflow.ExecuteActivity(ctx, activities.Build, req), nil
+		default:
+			return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -62,7 +63,7 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 
 	for {
 		var result *openai.ChatCompletion
-		err := workflow.ExecuteActivity(
+		err = workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
@@ -78,53 +79,45 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			futs := make([]workflow.Future, len(result.Choices[0].Message.ToolCalls))
-			for i, call := range result.Choices[0].Message.ToolCalls {
-				name := call.Function.Name
-				//args := call.Function.Arguments
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls,
+				resumeBuilderDispatcher(aiTools, github.ClientOptions{Owner: owner, Repo: repo}, branchName))
+			messages = append(messages, toolMsgs...)
+			continue
+		}
 
-				if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-					tName := param.GetFunction().Name
-					return tName == name
-				}) {
-					futs[i] = workflow.ExecuteActivity(ctx, activities.CallGithubTool, call)
-					continue
-				}
+		// Activate PR Builder workflow
+		var prNum int
+		err = workflow.ExecuteChildWorkflow(ctx, PullRequestAgent, owner, repo, branchName, input).Get(ctx, &prNum)
+		if err != nil {
+			return 0, err
+		}
 
-				switch name {
-				case tools.BuildToolDesc.OfFunction.Function.Name:
-					req := activities.BuildRequest{
-						ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
-						Branch:        branchName,
-						Builder:       "typst",
-					}
-					futs[i] = workflow.ExecuteActivity(ctx, activities.Build, req)
-				default:
-					messages = append(messages, openai.ToolMessage("Unsupported tool: "+name, call.ID))
-				}
+		return prNum, nil
+	}
+}
+
+func resumeBuilderDispatcher(
+	aiTools []openai.ChatCompletionToolUnionParam,
+	ghOpts github.ClientOptions,
+	branchName string,
+) tools.ToolDispatcher {
+	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+		if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+			return param.GetFunction().Name == call.Function.Name
+		}) {
+			return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
+		}
+
+		switch call.Function.Name {
+		case tools.BuildToolDesc.OfFunction.Function.Name:
+			req := activities.BuildRequest{
+				ClientOptions: ghOpts,
+				Branch:        branchName,
+				Builder:       "typst",
 			}
-
-			for i, fut := range futs {
-				if fut == nil {
-					continue
-				}
-
-				res, err := tools.GetToolResult(ctx, fut, result.Choices[0].Message.ToolCalls[i].ID)
-				if err != nil {
-					messages = append(messages, openai.ToolMessage(err.Error(), result.Choices[0].Message.ToolCalls[i].ID))
-					continue
-				}
-				messages = append(messages, res)
-			}
-		} else {
-			// Activate PR Builder workflow
-			var prNum int
-			err := workflow.ExecuteChildWorkflow(ctx, PullRequestAgent, owner, repo, branchName, input).Get(ctx, &prNum)
-			if err != nil {
-				return 0, err
-			}
-
-			return prNum, nil
+			return workflow.ExecuteActivity(ctx, activities.Build, req), nil
+		default:
+			return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 		}
 	}
 }

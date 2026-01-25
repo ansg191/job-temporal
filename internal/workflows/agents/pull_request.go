@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
 
@@ -89,50 +90,39 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			futs := make([]workflow.Future, len(result.Choices[0].Message.ToolCalls))
-			for i, call := range result.Choices[0].Message.ToolCalls {
-				name := call.Function.Name
-				if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-					tName := param.GetFunction().Name
-					return tName == name
-				}) {
-					futs[i] = workflow.ExecuteActivity(ctx, activities.CallGithubTool, call)
-				} else {
-					messages = append(messages, openai.ToolMessage("Unsupported tool: "+name, call.ID))
-				}
-			}
-
-			for i, fut := range futs {
-				if fut == nil {
-					continue
-				}
-
-				res, err := tools.GetToolResult(ctx, fut, result.Choices[0].Message.ToolCalls[i].ID)
-				if err != nil {
-					messages = append(messages, openai.ToolMessage(err.Error(), result.Choices[0].Message.ToolCalls[i].ID))
-					continue
-				}
-				messages = append(messages, res)
-			}
-		} else {
-			var pr prOutput
-			if err = json.Unmarshal([]byte(result.Choices[0].Message.Content), &pr); err != nil {
-				messages = append(messages, openai.UserMessage("Invalid output format: "+err.Error()))
-				continue
-			}
-
-			var prNum int
-			err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
-				ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
-				Title:         pr.Title,
-				Description:   pr.Body,
-				Head:          branch,
-				Base:          "main", // TODO: change this to the intermediate branch later
-			}).Get(ctx, &prNum)
-			if err != nil {
-				return 0, err
-			}
-			return prNum, nil
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, githubDispatcher(aiTools))
+			messages = append(messages, toolMsgs...)
+			continue
 		}
+
+		var pr prOutput
+		if err = json.Unmarshal([]byte(result.Choices[0].Message.Content), &pr); err != nil {
+			messages = append(messages, openai.UserMessage("Invalid output format: "+err.Error()))
+			continue
+		}
+
+		var prNum int
+		err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
+			ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
+			Title:         pr.Title,
+			Description:   pr.Body,
+			Head:          branch,
+			Base:          "main", // TODO: change this to the intermediate branch later
+		}).Get(ctx, &prNum)
+		if err != nil {
+			return 0, err
+		}
+		return prNum, nil
+	}
+}
+
+func githubDispatcher(aiTools []openai.ChatCompletionToolUnionParam) tools.ToolDispatcher {
+	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+		if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+			return param.GetFunction().Name == call.Function.Name
+		}) {
+			return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
+		}
+		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 	}
 }

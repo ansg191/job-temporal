@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -65,45 +66,36 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			futs := make([]workflow.Future, len(result.Choices[0].Message.ToolCalls))
-			for i, call := range result.Choices[0].Message.ToolCalls {
-				name := call.Function.Name
-				//args := call.Function.Arguments
-
-				switch name {
-				case tools.ListBranchesToolDesc.OfFunction.Function.Name:
-					req := activities.ListBranchesRequest{ClientOptions: ghOpts}
-					futs[i] = workflow.ExecuteActivity(ctx, activities.ListBranches, req)
-				}
-			}
-
-			for i, fut := range futs {
-				if fut == nil {
-					continue
-				}
-
-				res, err := tools.GetToolResult(ctx, fut, result.Choices[0].Message.ToolCalls[i].ID)
-				if err != nil {
-					messages = append(messages, openai.ToolMessage(err.Error(), result.Choices[0].Message.ToolCalls[i].ID))
-					continue
-				}
-				messages = append(messages, res)
-			}
-		} else {
-			branchName := result.Choices[0].Message.Content
-
-			req := activities.CreateBranchRequest{
-				ClientOptions: ghOpts,
-				Branch:        branchName,
-			}
-			err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
-			if err != nil {
-				messages = append(messages, openai.UserMessage("Unable to create branch: "+err.Error()+"\n"))
-				continue
-			}
-			return branchName, nil
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, branchNameDispatcher(ghOpts))
+			messages = append(messages, toolMsgs...)
+			continue
 		}
+
+		branchName := result.Choices[0].Message.Content
+
+		req := activities.CreateBranchRequest{
+			ClientOptions: ghOpts,
+			Branch:        branchName,
+		}
+		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
+		if err != nil {
+			messages = append(messages, openai.UserMessage("Unable to create branch: "+err.Error()+"\n"))
+			continue
+		}
+		return branchName, nil
 	}
 
 	return "", temporal.NewNonRetryableApplicationError("failed to generate branch name", "BranchNameError", nil)
+}
+
+func branchNameDispatcher(ghOpts github.ClientOptions) tools.ToolDispatcher {
+	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+		switch call.Function.Name {
+		case tools.ListBranchesToolDesc.OfFunction.Function.Name:
+			req := activities.ListBranchesRequest{ClientOptions: ghOpts}
+			return workflow.ExecuteActivity(ctx, activities.ListBranches, req), nil
+		default:
+			return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+		}
+	}
 }
