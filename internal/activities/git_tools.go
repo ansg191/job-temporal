@@ -47,3 +47,24 @@ func CreateBranch(ctx context.Context, req CreateBranchRequest) error {
 
 	return client.CreateBranch(ctx, req.Branch)
 }
+
+type CreatePullRequestRequest struct {
+	github.ClientOptions
+	Title       string
+	Description string
+	Head        string
+	Base        string
+}
+
+func CreatePullRequest(ctx context.Context, req CreatePullRequestRequest) (int, error) {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return 0, temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	return client.CreatePullRequest(ctx, req.Title, req.Description, req.Head, req.Base)
+}

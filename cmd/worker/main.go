@@ -39,6 +39,7 @@ func main() {
 	w.RegisterActivity(activities.Build)
 	w.RegisterActivity(activities.ListBranches)
 	w.RegisterActivity(activities.CreateBranch)
+	w.RegisterActivity(activities.CreatePullRequest)
 	w.RegisterActivity(activities.ListGithubTools)
 	w.RegisterActivity(activities.CallGithubTool)
 	w.RegisterActivity(activities.RegisterReviewReadyPR)

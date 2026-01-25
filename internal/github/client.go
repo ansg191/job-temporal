@@ -103,3 +103,22 @@ func (c *Client) CreateBranch(ctx context.Context, branch string) error {
 	})
 	return err
 }
+
+func (c *Client) CreatePullRequest(ctx context.Context, title, description, head, base string) (int, error) {
+	pr, _, err := c.PullRequests.Create(
+		ctx,
+		c.owner,
+		c.repo,
+		&github.NewPullRequest{
+			Title:               &title,
+			Head:                &head,
+			Base:                &base,
+			Body:                &description,
+			MaintainerCanModify: github.Ptr(true),
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return pr.GetNumber(), nil
+}

@@ -1,18 +1,24 @@
 package agents
 
 import (
-	"fmt"
+	"encoding/json"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/tools"
 )
+
+type prOutput struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+var prOutputFormat = activities.GenerateResponseFormat[prOutput]("pr_output")
 
 const PullRequestInstructions = `
 You are a pull request agent who creates pull requests for the repository.
@@ -20,18 +26,29 @@ These pull requests are created from branches that were created by previous agen
 These agent's took a job application, and tailored a resume for that specific job application.
 
 CORE RESPONSIBILITIES:
-1. Given a branch name, create a pull request for the repository.
+1. Given a branch name, create a pull request description and title for the repository.
 2. Give the pull request a descriptive title and description based on the changes made in the branch.
 3. Be very descriptive in the pull request description. Try to explain every change and why it was done using the 
 changes, commit history, & job description.
-4. Return the pull request number.
+4. Return the description and title in the provided output format.
 
 IMPORTANT NOTES:
 - Only work in the repository provided
 - Only work in the branch provided
+- DO NOT under ANY circumstance create the pull request yourself using the Github tools.
+The pull request will be made using the title and description returned by you.
 
 AVAILABLE TOOLS:
-- Github MCP tools to create pull requests in the repository.
+- Github MCP tools to help you understand the changes made in the branch.
+Use these tools to get information about the changes made in the branch.
+
+OUTPUT FORMAT:
+When you are ready to create the pull request, respond with a JSON object with the following format:
+{
+	"title": "Pull request title",
+	"body": "Pull request description. Make sure to use escape characters"
+}
+This will be used to create the pull request.
 `
 
 func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (int, error) {
@@ -55,13 +72,14 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 
 	for {
 		var result *openai.ChatCompletion
-		err := workflow.ExecuteActivity(
+		err = workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:    openai.ChatModelGPT5_2,
-				Messages: messages,
-				Tools:    aiTools,
+				Model:          openai.ChatModelGPT5_2,
+				Messages:       messages,
+				Tools:          aiTools,
+				ResponseFormat: prOutputFormat,
 			},
 		).Get(ctx, &result)
 		if err != nil {
@@ -97,14 +115,24 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 				messages = append(messages, res)
 			}
 		} else {
-			prString := strings.TrimPrefix(result.Choices[0].Message.Content, "#")
-			prNum, err := strconv.ParseInt(prString, 10, 32)
-			if err != nil {
-				messages = append(messages, openai.UserMessage(
-					fmt.Sprintf("Unable to parse pull request number %s", err.Error())))
+			var pr prOutput
+			if err = json.Unmarshal([]byte(result.Choices[0].Message.Content), &pr); err != nil {
+				messages = append(messages, openai.UserMessage("Invalid output format: "+err.Error()))
 				continue
 			}
-			return int(prNum), nil
+
+			var prNum int
+			err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
+				ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
+				Title:         pr.Title,
+				Description:   pr.Body,
+				Head:          branch,
+				Base:          "main", // TODO: change this to the intermediate branch later
+			}).Get(ctx, &prNum)
+			if err != nil {
+				return 0, err
+			}
+			return prNum, nil
 		}
 	}
 }
