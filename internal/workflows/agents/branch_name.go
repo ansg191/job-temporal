@@ -44,6 +44,7 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	ghOpts := github.ClientOptions{Owner: owner, Repo: repo}
+	dispatcher := &branchNameDispatcher{ghOpts: ghOpts}
 
 	for range 5 {
 		var result *openai.ChatCompletion
@@ -66,7 +67,7 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, branchNameDispatcher(ghOpts))
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
@@ -88,14 +89,16 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 	return "", temporal.NewNonRetryableApplicationError("failed to generate branch name", "BranchNameError", nil)
 }
 
-func branchNameDispatcher(ghOpts github.ClientOptions) tools.ToolDispatcher {
-	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-		switch call.Function.Name {
-		case tools.ListBranchesToolDesc.OfFunction.Function.Name:
-			req := activities.ListBranchesRequest{ClientOptions: ghOpts}
-			return workflow.ExecuteActivity(ctx, activities.ListBranches, req), nil
-		default:
-			return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
-		}
+type branchNameDispatcher struct {
+	ghOpts github.ClientOptions
+}
+
+func (d *branchNameDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+	switch call.Function.Name {
+	case tools.ListBranchesToolDesc.OfFunction.Function.Name:
+		req := activities.ListBranchesRequest{ClientOptions: d.ghOpts}
+		return workflow.ExecuteActivity(ctx, activities.ListBranches, req), nil
+	default:
+		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 	}
 }

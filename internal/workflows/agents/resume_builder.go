@@ -61,6 +61,12 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 		return 0, err
 	}
 
+	dispatcher := &resumeBuilderDispatcher{
+		aiTools:    aiTools,
+		ghOpts:     github.ClientOptions{Owner: owner, Repo: repo},
+		branchName: branchName,
+	}
+
 	for {
 		var result *openai.ChatCompletion
 		err = workflow.ExecuteActivity(
@@ -79,8 +85,7 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls,
-				resumeBuilderDispatcher(aiTools, github.ClientOptions{Owner: owner, Repo: repo}, branchName))
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
@@ -96,28 +101,28 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 	}
 }
 
-func resumeBuilderDispatcher(
-	aiTools []openai.ChatCompletionToolUnionParam,
-	ghOpts github.ClientOptions,
-	branchName string,
-) tools.ToolDispatcher {
-	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-		if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-			return param.GetFunction().Name == call.Function.Name
-		}) {
-			return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
-		}
+type resumeBuilderDispatcher struct {
+	aiTools    []openai.ChatCompletionToolUnionParam
+	ghOpts     github.ClientOptions
+	branchName string
+}
 
-		switch call.Function.Name {
-		case tools.BuildToolDesc.OfFunction.Function.Name:
-			req := activities.BuildRequest{
-				ClientOptions: ghOpts,
-				Branch:        branchName,
-				Builder:       "typst",
-			}
-			return workflow.ExecuteActivity(ctx, activities.Build, req), nil
-		default:
-			return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+func (d *resumeBuilderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+		return param.GetFunction().Name == call.Function.Name
+	}) {
+		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
+	}
+
+	switch call.Function.Name {
+	case tools.BuildToolDesc.OfFunction.Function.Name:
+		req := activities.BuildRequest{
+			ClientOptions: d.ghOpts,
+			Branch:        d.branchName,
+			Builder:       "typst",
 		}
+		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
+	default:
+		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 	}
 }

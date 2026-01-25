@@ -71,6 +71,8 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 		return 0, err
 	}
 
+	dispatcher := &githubDispatcher{aiTools: aiTools}
+
 	for {
 		var result *openai.ChatCompletion
 		err = workflow.ExecuteActivity(
@@ -90,7 +92,7 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 		messages = append(messages, result.Choices[0].Message.ToParam())
 
 		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, githubDispatcher(aiTools))
+			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
@@ -116,13 +118,15 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 	}
 }
 
-func githubDispatcher(aiTools []openai.ChatCompletionToolUnionParam) tools.ToolDispatcher {
-	return func(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-		if slices.ContainsFunc(aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-			return param.GetFunction().Name == call.Function.Name
-		}) {
-			return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
-		}
-		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+type githubDispatcher struct {
+	aiTools []openai.ChatCompletionToolUnionParam
+}
+
+func (d *githubDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
+		return param.GetFunction().Name == call.Function.Name
+	}) {
+		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
+	return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 }
