@@ -25,7 +25,7 @@ func main() {
 
 	w := worker.New(c, "my-task-queue", worker.Options{})
 
-	w.RegisterWorkflow(workflows.ResumeWorkflow)
+	w.RegisterWorkflow(workflows.BuilderWorkflow)
 	w.RegisterWorkflow(agents.BranchNameAgent)
 	w.RegisterWorkflow(agents.BuilderWorkflow)
 	w.RegisterWorkflow(agents.PullRequestAgent)

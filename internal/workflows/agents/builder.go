@@ -20,16 +20,10 @@ const (
 	BuildTargetCoverLetter
 )
 
-type Builder int
-
-const (
-	BuilderTypst Builder = iota
-)
-
 type BuilderAgentRequest struct {
 	github.ClientOptions
 	BuildTarget  BuildTarget `json:"build_target"`
-	Builder      Builder     `json:"builder"`
+	Builder      string      `json:"builder"`
 	BranchName   string      `json:"branch_name"`
 	TargetBranch string      `json:"target_branch"`
 	Job          string      `json:"job"`
@@ -125,24 +119,15 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompl
 
 	switch call.Function.Name {
 	case tools.BuildToolDesc.OfFunction.Function.Name:
-		builder, ok := builderMap[d.builder]
-		if !ok {
-			return nil, fmt.Errorf("invalid builder: %d", d.builder)
-		}
-
 		req := activities.BuildRequest{
 			ClientOptions: d.ghOpts,
 			Branch:        d.branchName,
-			Builder:       builder,
+			Builder:       d.builder,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
 	}
-}
-
-var builderMap = map[Builder]string{
-	BuilderTypst: "typst",
 }
 
 var buildTargetMap = map[BuildTarget]string{

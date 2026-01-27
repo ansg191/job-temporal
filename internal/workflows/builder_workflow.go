@@ -1,28 +1,37 @@
 package workflows
 
 import (
+	"fmt"
+
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
 )
 
-type ResumeWorkflowRequest struct {
+type BuilderWorkflowRequest struct {
 	github.ClientOptions
 	JobDesc      string `json:"job_desc"`
 	TargetBranch string `json:"target_branch"`
+	Purpose      string `json:"purpose"`
+	Builder      string `json:"builder"`
 }
 
-func ResumeWorkflow(ctx workflow.Context, req ResumeWorkflowRequest) error {
+func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
+	purpose, buildTarget, err := resolvePurpose(req.Purpose)
+	if err != nil {
+		return err
+	}
+
 	// Create new branch for us to work with
 	var branchName string
-	err := workflow.ExecuteChildWorkflow(
+	err = workflow.ExecuteChildWorkflow(
 		ctx,
 		agents.BranchNameAgent,
 		agents.BranchNameAgentRequest{
 			ClientOptions:  req.ClientOptions,
 			JobDescription: req.JobDesc,
-			Purpose:        agents.BranchNameAgentPurposeResume,
+			Purpose:        purpose,
 		},
 	).Get(ctx, &branchName)
 	if err != nil {
@@ -35,8 +44,8 @@ func ResumeWorkflow(ctx workflow.Context, req ResumeWorkflowRequest) error {
 		agents.BuilderWorkflow,
 		agents.BuilderAgentRequest{
 			ClientOptions: req.ClientOptions,
-			BuildTarget:   agents.BuildTargetResume,
-			Builder:       agents.BuilderTypst,
+			BuildTarget:   buildTarget,
+			Builder:       req.Builder,
 			BranchName:    branchName,
 			TargetBranch:  req.TargetBranch,
 			Job:           req.JobDesc,
@@ -60,4 +69,15 @@ func ResumeWorkflow(ctx workflow.Context, req ResumeWorkflowRequest) error {
 	}
 
 	return nil
+}
+
+func resolvePurpose(purpose string) (agents.BranchNameAgentPurpose, agents.BuildTarget, error) {
+	switch purpose {
+	case "resume":
+		return agents.BranchNameAgentPurposeResume, agents.BuildTargetResume, nil
+	case "cover_letter":
+		return agents.BranchNameAgentPurposeCoverLetter, agents.BuildTargetCoverLetter, nil
+	default:
+		return "", 0, fmt.Errorf("invalid purpose: %s", purpose)
+	}
 }
