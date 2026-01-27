@@ -52,12 +52,19 @@ When you are ready to create the pull request, respond with a JSON object with t
 This will be used to create the pull request.
 `
 
-func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (int, error) {
+type PullRequestAgentRequest struct {
+	github.ClientOptions
+	Branch string `json:"branch"`
+	Target string `json:"target"`
+	Job    string `json:"job"`
+}
+
+func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(PullRequestInstructions),
-		openai.UserMessage("Remote: " + owner + "/" + repo),
-		openai.UserMessage("Branch Name: " + branch),
-		openai.UserMessage("Job description: " + job),
+		openai.UserMessage("Remote: " + req.Owner + "/" + req.Repo),
+		openai.UserMessage("Branch Name: " + req.Branch),
+		openai.UserMessage("Job description: " + req.Job),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -105,11 +112,11 @@ func PullRequestAgent(ctx workflow.Context, owner, repo, branch, job string) (in
 
 		var prNum int
 		err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
-			ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
+			ClientOptions: req.ClientOptions,
 			Title:         pr.Title,
 			Description:   pr.Body,
-			Head:          branch,
-			Base:          "main", // TODO: change this to the intermediate branch later
+			Head:          req.Branch,
+			Base:          req.Target,
 		}).Get(ctx, &prNum)
 		if err != nil {
 			return 0, err

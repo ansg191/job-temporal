@@ -16,14 +16,15 @@ import (
 const branchNameAgentInstructions = `
 You are an expert git branch namer. Your job is to create concise, descriptive,
 and standardized branch names based on a job posting description.
-This branch name will be used to modify the resume of a job applicant to better fit.
+This branch name will be used to modify the resume or cover letter of a job applicant to better fit.
 
 CORE RESPONSIBILITIES:
 1. Read the job posting description carefully.
 2. Create a unique, concise, & human-readable branch name that reflects the job role.
-3. Use lowercase letters, numbers, and hyphens only.
-4. Avoid special characters, spaces, or underscores.
-5. Keep the branch name under 16 characters.
+3. Create separate branches for the specified purpose (resume, cover letter, final).
+4. Use lowercase letters, numbers, and hyphens only.
+5. Avoid special characters, spaces, or underscores.
+6. Keep the branch name under 16 characters.
 
 AVAILABLE TOOLS:
 - list_branches(): List existing branch names. Avoid duplicates.
@@ -32,10 +33,31 @@ OUTPUT FORMAT:
 Respond with only the branch name as a single string, without any additional text or formatting.
 `
 
-func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (string, error) {
+type BranchNameAgentPurpose string
+
+const (
+	BranchNameAgentPurposeResume      BranchNameAgentPurpose = "resume"
+	BranchNameAgentPurposeCoverLetter BranchNameAgentPurpose = "cover_letter"
+	BranchNameAgentPurposeFinal       BranchNameAgentPurpose = "final"
+)
+
+type BranchNameAgentRequest struct {
+	github.ClientOptions
+	JobDescription string                 `json:"job_description"`
+	Purpose        BranchNameAgentPurpose `json:"purpose"`
+}
+
+func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, error) {
+	if req.Purpose != BranchNameAgentPurposeResume &&
+		req.Purpose != BranchNameAgentPurposeCoverLetter &&
+		req.Purpose != BranchNameAgentPurposeFinal {
+		return "", temporal.NewNonRetryableApplicationError("invalid purpose", "InvalidPurpose", nil)
+	}
+
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(branchNameAgentInstructions),
-		openai.UserMessage("Job Description:\n" + jobDescription),
+		openai.UserMessage("Purpose: " + string(req.Purpose)),
+		openai.UserMessage("Job Description:\n" + req.JobDescription),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -43,8 +65,7 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	ghOpts := github.ClientOptions{Owner: owner, Repo: repo}
-	dispatcher := &branchNameDispatcher{ghOpts: ghOpts}
+	dispatcher := &branchNameDispatcher{ghOpts: req.ClientOptions}
 
 	for range 5 {
 		var result *openai.ChatCompletion
@@ -75,7 +96,7 @@ func BranchNameAgent(ctx workflow.Context, owner, repo, jobDescription string) (
 		branchName := result.Choices[0].Message.Content
 
 		req := activities.CreateBranchRequest{
-			ClientOptions: ghOpts,
+			ClientOptions: req.ClientOptions,
 			Branch:        branchName,
 		}
 		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)

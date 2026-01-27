@@ -10,26 +10,45 @@ import (
 )
 
 func AgentWorkflow(ctx workflow.Context, owner, repo string, input string) (string, error) {
+	ghOpts := github.ClientOptions{Owner: owner, Repo: repo}
+
 	var branchName string
-	err := workflow.ExecuteChildWorkflow(ctx, agents.BranchNameAgent, owner, repo, input).Get(ctx, &branchName)
+	err := workflow.ExecuteChildWorkflow(
+		ctx,
+		agents.BranchNameAgent,
+		agents.BranchNameAgentRequest{
+			ClientOptions:  ghOpts,
+			JobDescription: input,
+			Purpose:        agents.BranchNameAgentPurposeResume,
+		},
+	).Get(ctx, &branchName)
 	if err != nil {
 		return "", err
 	}
 
 	var pr int
-	err = workflow.ExecuteChildWorkflow(ctx, agents.ResumeBuilderWorkflow, owner, repo, branchName, input).Get(ctx, &pr)
+	err = workflow.ExecuteChildWorkflow(
+		ctx,
+		agents.ResumeBuilderWorkflow,
+		agents.ResumeBuilderAgentRequest{
+			ClientOptions: ghOpts,
+			BranchName:    branchName,
+			Job:           input,
+		},
+	).Get(ctx, &pr)
 	if err != nil {
 		return "", err
 	}
 
-	err = workflow.ExecuteChildWorkflow(ctx, agents.ReviewAgent, agents.ReviewAgentArgs{
-		Repo: github.ClientOptions{
-			Owner: owner,
-			Repo:  repo,
+	err = workflow.ExecuteChildWorkflow(
+		ctx,
+		agents.ReviewAgent,
+		agents.ReviewAgentArgs{
+			Repo:       ghOpts,
+			Pr:         pr,
+			BranchName: branchName,
 		},
-		Pr:         pr,
-		BranchName: branchName,
-	}).Get(ctx, &pr)
+	).Get(ctx, &pr)
 	if err != nil {
 		return "", err
 	}

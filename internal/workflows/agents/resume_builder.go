@@ -42,12 +42,18 @@ AVAILABLE TOOLS:
 - build(): Compile the resume and perform various checks
 `
 
-func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input string) (int, error) {
+type ResumeBuilderAgentRequest struct {
+	github.ClientOptions
+	BranchName string `json:"branch_name"`
+	Job        string `json:"job"`
+}
+
+func ResumeBuilderWorkflow(ctx workflow.Context, req ResumeBuilderAgentRequest) (int, error) {
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(ResumeBuilderInstructions),
-		openai.UserMessage("Remote: " + owner + "/" + repo),
-		openai.UserMessage("Branch Name: " + branchName),
-		openai.UserMessage("Job Application:\n" + input),
+		openai.UserMessage("Remote: " + req.Owner + "/" + req.Repo),
+		openai.UserMessage("Branch Name: " + req.BranchName),
+		openai.UserMessage("Job Application:\n" + req.Job),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -63,8 +69,8 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 
 	dispatcher := &resumeBuilderDispatcher{
 		aiTools:    aiTools,
-		ghOpts:     github.ClientOptions{Owner: owner, Repo: repo},
-		branchName: branchName,
+		ghOpts:     req.ClientOptions,
+		branchName: req.BranchName,
 	}
 
 	for {
@@ -92,7 +98,16 @@ func ResumeBuilderWorkflow(ctx workflow.Context, owner, repo, branchName, input 
 
 		// Activate PR Builder workflow
 		var prNum int
-		err = workflow.ExecuteChildWorkflow(ctx, PullRequestAgent, owner, repo, branchName, input).Get(ctx, &prNum)
+		err = workflow.ExecuteChildWorkflow(
+			ctx,
+			PullRequestAgent,
+			PullRequestAgentRequest{
+				ClientOptions: req.ClientOptions,
+				Branch:        req.BranchName,
+				Target:        "main",
+				Job:           req.Job,
+			},
+		).Get(ctx, &prNum)
 		if err != nil {
 			return 0, err
 		}

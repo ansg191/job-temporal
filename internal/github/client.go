@@ -17,8 +17,8 @@ type Client struct {
 }
 
 type ClientOptions struct {
-	Owner string
-	Repo  string
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
 }
 
 func NewClient(opts ClientOptions) (*Client, error) {
