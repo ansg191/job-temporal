@@ -32,9 +32,11 @@ func ResumeWorkflow(ctx workflow.Context, req ResumeWorkflowRequest) error {
 	var pr int
 	err = workflow.ExecuteChildWorkflow(
 		ctx,
-		agents.ResumeBuilderWorkflow,
-		agents.ResumeBuilderAgentRequest{
+		agents.BuilderWorkflow,
+		agents.BuilderAgentRequest{
 			ClientOptions: req.ClientOptions,
+			BuildTarget:   agents.BuildTargetResume,
+			Builder:       agents.BuilderTypst,
 			BranchName:    branchName,
 			TargetBranch:  req.TargetBranch,
 			Job:           req.JobDesc,

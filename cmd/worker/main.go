@@ -27,7 +27,7 @@ func main() {
 
 	w.RegisterWorkflow(workflows.ResumeWorkflow)
 	w.RegisterWorkflow(agents.BranchNameAgent)
-	w.RegisterWorkflow(agents.ResumeBuilderWorkflow)
+	w.RegisterWorkflow(agents.BuilderWorkflow)
 	w.RegisterWorkflow(agents.PullRequestAgent)
 	w.RegisterWorkflow(agents.ReviewAgent)
 	w.RegisterActivity(activities.Greet)
