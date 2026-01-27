@@ -44,8 +44,9 @@ AVAILABLE TOOLS:
 
 type ResumeBuilderAgentRequest struct {
 	github.ClientOptions
-	BranchName string `json:"branch_name"`
-	Job        string `json:"job"`
+	BranchName   string `json:"branch_name"`
+	TargetBranch string `json:"target_branch"`
+	Job          string `json:"job"`
 }
 
 func ResumeBuilderWorkflow(ctx workflow.Context, req ResumeBuilderAgentRequest) (int, error) {
@@ -104,7 +105,7 @@ func ResumeBuilderWorkflow(ctx workflow.Context, req ResumeBuilderAgentRequest) 
 			PullRequestAgentRequest{
 				ClientOptions: req.ClientOptions,
 				Branch:        req.BranchName,
-				Target:        "main",
+				Target:        req.TargetBranch,
 				Job:           req.Job,
 			},
 		).Get(ctx, &prNum)

@@ -1,29 +1,32 @@
 package workflows
 
 import (
-	"strconv"
-
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
 )
 
-func AgentWorkflow(ctx workflow.Context, owner, repo string, input string) (string, error) {
-	ghOpts := github.ClientOptions{Owner: owner, Repo: repo}
+type ResumeWorkflowRequest struct {
+	github.ClientOptions
+	JobDesc      string `json:"job_desc"`
+	TargetBranch string `json:"target_branch"`
+}
 
+func ResumeWorkflow(ctx workflow.Context, req ResumeWorkflowRequest) error {
+	// Create new branch for us to work with
 	var branchName string
 	err := workflow.ExecuteChildWorkflow(
 		ctx,
 		agents.BranchNameAgent,
 		agents.BranchNameAgentRequest{
-			ClientOptions:  ghOpts,
-			JobDescription: input,
+			ClientOptions:  req.ClientOptions,
+			JobDescription: req.JobDesc,
 			Purpose:        agents.BranchNameAgentPurposeResume,
 		},
 	).Get(ctx, &branchName)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	var pr int
@@ -31,27 +34,28 @@ func AgentWorkflow(ctx workflow.Context, owner, repo string, input string) (stri
 		ctx,
 		agents.ResumeBuilderWorkflow,
 		agents.ResumeBuilderAgentRequest{
-			ClientOptions: ghOpts,
+			ClientOptions: req.ClientOptions,
 			BranchName:    branchName,
-			Job:           input,
+			TargetBranch:  req.TargetBranch,
+			Job:           req.JobDesc,
 		},
 	).Get(ctx, &pr)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	err = workflow.ExecuteChildWorkflow(
 		ctx,
 		agents.ReviewAgent,
 		agents.ReviewAgentArgs{
-			Repo:       ghOpts,
+			Repo:       req.ClientOptions,
 			Pr:         pr,
 			BranchName: branchName,
 		},
 	).Get(ctx, &pr)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return strconv.Itoa(pr), nil
+	return nil
 }

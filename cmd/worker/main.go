@@ -25,13 +25,12 @@ func main() {
 
 	w := worker.New(c, "my-task-queue", worker.Options{})
 
-	w.RegisterWorkflow(workflows.SayHelloWorkflow)
+	w.RegisterWorkflow(workflows.ResumeWorkflow)
 	w.RegisterWorkflow(agents.BranchNameAgent)
 	w.RegisterWorkflow(agents.ResumeBuilderWorkflow)
 	w.RegisterWorkflow(agents.PullRequestAgent)
 	w.RegisterWorkflow(agents.ReviewAgent)
 	w.RegisterActivity(activities.Greet)
-	w.RegisterWorkflow(workflows.AgentWorkflow)
 	w.RegisterActivity(activities.CallAI)
 	w.RegisterActivity(activities.ReadFile)
 	w.RegisterActivity(activities.EditFile)
