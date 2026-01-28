@@ -29,7 +29,7 @@ type BuilderAgentRequest struct {
 	Job          string      `json:"job"`
 }
 
-func BuilderWorkflow(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
+func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	instructions, ok := buildTargetMap[req.BuildTarget]
 	if !ok {
 		return 0, fmt.Errorf("invalid build target: %d", req.BuildTarget)
@@ -54,10 +54,11 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderAgentRequest) (int, error)
 	}
 
 	dispatcher := &builderDispatcher{
-		aiTools:    aiTools,
-		ghOpts:     req.ClientOptions,
-		branchName: req.BranchName,
-		builder:    req.Builder,
+		aiTools:     aiTools,
+		ghOpts:      req.ClientOptions,
+		branchName:  req.BranchName,
+		builder:     req.Builder,
+		buildTarget: req.BuildTarget,
 	}
 
 	for {
@@ -104,10 +105,11 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderAgentRequest) (int, error)
 }
 
 type builderDispatcher struct {
-	aiTools    []openai.ChatCompletionToolUnionParam
-	ghOpts     github.ClientOptions
-	branchName string
-	builder    Builder
+	aiTools     []openai.ChatCompletionToolUnionParam
+	ghOpts      github.ClientOptions
+	branchName  string
+	builder     string
+	buildTarget BuildTarget
 }
 
 func (d *builderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
@@ -119,10 +121,19 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompl
 
 	switch call.Function.Name {
 	case tools.BuildToolDesc.OfFunction.Function.Name:
+		var file string
+		switch d.buildTarget {
+		case BuildTargetResume:
+			file = "resume.typ"
+		case BuildTargetCoverLetter:
+			file = "cover_letter.typ"
+		}
+
 		req := activities.BuildRequest{
 			ClientOptions: d.ghOpts,
 			Branch:        d.branchName,
 			Builder:       d.builder,
+			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:
@@ -165,5 +176,30 @@ AVAILABLE TOOLS:
 `
 
 const CoverLetterBuilderInstructions = `
-TODO
+You are a cover letter builder who creates personalized cover letters for applicants that
+are specialized for specific applications.
+
+CORE RESPONSIBILITIES:
+1. Read applicant's profile from the cover letter pages and identify relevant points for the target job.
+2. Tailor the cover letter to highlight skills and experiences that match the job description.
+3. Ensure the cover letter is well-structured, clear, and professional.
+4. Avoid unnecessary punctuation (parenthesis, semicolons, dashes, etc)
+
+IMPORTANT NOTES:
+- The Cover Letter is built in typst. You will edit typst files that are used by a
+template to build the cover letter.
+- Important pages:
+	- person.typ: Information about the applicant
+	- jobs.typ: Information about professional experience
+	- school.typ: Information about educational background
+	- projects.typ: Information about personal projects
+	- letter.typ: Cover letter content file
+	- cover_letter.typ: Cover letter formatting file that pulls info from other files. You can read this file for context, but do NOT edit it.
+- The Cover Letter MUST be under 1 page. This will be checked by the build tool.
+- Only work in in the repository provided
+- Only work in the branch provided
+
+AVAILABLE TOOLS:
+- Github MCP tools to read and edit files in the applicant's resume repository.
+- build(): Compile the cover letter and perform various checks
 `

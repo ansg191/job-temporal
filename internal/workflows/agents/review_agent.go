@@ -45,9 +45,10 @@ AVAILABLE TOOLS:
 `
 
 type ReviewAgentArgs struct {
-	Repo       github.ClientOptions `json:"repo"`
-	Pr         int                  `json:"pr"`
-	BranchName string               `json:"branch_name"`
+	Repo        github.ClientOptions `json:"repo"`
+	Pr          int                  `json:"pr"`
+	BranchName  string               `json:"branch_name"`
+	BuildTarget BuildTarget          `json:"build_target"`
 }
 
 func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
@@ -107,9 +108,10 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		)
 
 		dispatcher := &reviewAgentDispatcher{
-			aiTools:    aiTools,
-			ghOpts:     args.Repo,
-			branchName: args.BranchName,
+			aiTools:     aiTools,
+			ghOpts:      args.Repo,
+			branchName:  args.BranchName,
+			buildTarget: args.BuildTarget,
 		}
 
 		for {
@@ -143,9 +145,10 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 }
 
 type reviewAgentDispatcher struct {
-	aiTools    []openai.ChatCompletionToolUnionParam
-	ghOpts     github.ClientOptions
-	branchName string
+	aiTools     []openai.ChatCompletionToolUnionParam
+	ghOpts      github.ClientOptions
+	branchName  string
+	buildTarget BuildTarget
 }
 
 func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
@@ -157,10 +160,19 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call openai.ChatC
 
 	switch call.Function.Name {
 	case tools.BuildToolDesc.OfFunction.Function.Name:
+		var file string
+		switch d.buildTarget {
+		case BuildTargetResume:
+			file = "resume.typ"
+		case BuildTargetCoverLetter:
+			file = "cover_letter.typ"
+		}
+
 		req := activities.BuildRequest{
 			ClientOptions: d.ghOpts,
 			Branch:        d.branchName,
 			Builder:       "typst",
+			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:

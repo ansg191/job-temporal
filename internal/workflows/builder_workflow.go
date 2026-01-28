@@ -41,7 +41,7 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
 	var pr int
 	err = workflow.ExecuteChildWorkflow(
 		ctx,
-		agents.BuilderWorkflow,
+		agents.BuilderAgent,
 		agents.BuilderAgentRequest{
 			ClientOptions: req.ClientOptions,
 			BuildTarget:   buildTarget,
@@ -59,9 +59,10 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
 		ctx,
 		agents.ReviewAgent,
 		agents.ReviewAgentArgs{
-			Repo:       req.ClientOptions,
-			Pr:         pr,
-			BranchName: branchName,
+			Repo:        req.ClientOptions,
+			Pr:          pr,
+			BranchName:  branchName,
+			BuildTarget: buildTarget,
 		},
 	).Get(ctx, &pr)
 	if err != nil {

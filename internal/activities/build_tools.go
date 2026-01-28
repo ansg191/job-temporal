@@ -2,6 +2,7 @@ package activities
 
 import (
 	"context"
+	"path"
 	"strings"
 
 	"github.com/ansg191/job-temporal/internal/builder"
@@ -13,6 +14,7 @@ type BuildRequest struct {
 	github.ClientOptions
 	Branch  string `json:"branch"`
 	Builder string `json:"builder"`
+	File    string `json:"file"`
 }
 
 func Build(ctx context.Context, req BuildRequest) (string, error) {
@@ -40,7 +42,8 @@ func Build(ctx context.Context, req BuildRequest) (string, error) {
 	}
 
 	// Setup the builder
-	b, err := builder.NewBuilder(req.Builder, builder.WithTypstRootFile(repo.Path()+"/resume.typ"))
+	file := path.Join(repo.Path(), req.File)
+	b, err := builder.NewBuilder(req.Builder, builder.WithTypstRootFile(file))
 	if err != nil {
 		return "", err
 	}

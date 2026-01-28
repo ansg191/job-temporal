@@ -32,16 +32,13 @@ func main() {
 	we, err := c.ExecuteWorkflow(
 		ctx,
 		options,
-		workflows.BuilderWorkflow,
-		workflows.BuilderWorkflowRequest{
+		workflows.JobWorkflow,
+		workflows.JobWorkflowRequest{
 			ClientOptions: github.ClientOptions{
 				Owner: "ansg191",
 				Repo:  "resume",
 			},
-			JobDesc:      os.Args[1],
-			TargetBranch: "main",
-			Purpose:      "resume",
-			Builder:      "typst",
+			JobDesc: os.Args[1],
 		},
 	)
 	if err != nil {
