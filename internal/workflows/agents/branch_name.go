@@ -67,10 +67,14 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	dispatcher := &branchNameDispatcher{ghOpts: req.ClientOptions}
+	conversationID, err := createConversation(ctx, nil)
+	if err != nil {
+		return "", err
+	}
 
 	for range 5 {
 		var result *responses.Response
-		err := workflow.ExecuteActivity(
+		err = workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
@@ -79,18 +83,16 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 				Tools: []responses.ToolUnionParam{
 					tools.ListBranchesToolDesc,
 				},
-				Temperature: openai.Float(0),
+				Temperature:    openai.Float(0),
+				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return "", err
 		}
 
-		messages = appendOutput(messages, result.Output)
-
 		if hasFunctionCalls(result.Output) {
-			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
-			messages = append(messages, toolMsgs...)
+			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			continue
 		}
 
@@ -102,7 +104,9 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 		}
 		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
 		if err != nil {
-			messages = append(messages, userMessage("Unable to create branch: "+err.Error()+"\n"))
+			messages = responses.ResponseInputParam{
+				userMessage("Unable to create branch: " + err.Error() + "\n"),
+			}
 			continue
 		}
 		return branchName, nil

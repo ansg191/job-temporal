@@ -83,6 +83,11 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	if err != nil {
 		return err
 	}
+	conversationID, err := createConversation(ctx, nil)
+	if err != nil {
+		return err
+	}
+	initialized := false
 
 	for {
 		// Wait for signal
@@ -106,10 +111,13 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 			return err
 		}
 		workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
-		messages = append(
-			messages,
-			userMessage("User Review: "+string(signalBytes)),
-		)
+		pendingInput := responses.ResponseInputParam{
+			userMessage("User Review: " + string(signalBytes)),
+		}
+		if !initialized {
+			pendingInput = append(messages, pendingInput...)
+			initialized = true
+		}
 
 		dispatcher := &reviewAgentDispatcher{
 			aiTools:     aiTools,
@@ -125,16 +133,15 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 				ctx,
 				activities.CallAI,
 				activities.OpenAIResponsesRequest{
-					Model: openai.ChatModelGPT5_2,
-					Input: messages,
-					Tools: append(aiTools, tools.BuildToolDesc),
+					Model:          openai.ChatModelGPT5_2,
+					Input:          pendingInput,
+					Tools:          append(aiTools, tools.BuildToolDesc),
+					ConversationID: conversationID,
 				},
 			).Get(ctx, &result)
 			if err != nil {
 				return err
 			}
-
-			messages = appendOutput(messages, result.Output)
 
 			if !hasFunctionCalls(result.Output) {
 				// Finished with agent loop, rebuild the PDF
@@ -154,10 +161,10 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 						// Build failed, so kick back to Ai to fix
 						var details []string
 						_ = appErr.Details(&details)
-						messages = append(messages, userMessage(fmt.Sprintf(
+						pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
 							"Build failed, fix and try again: \n%s",
 							strings.Join(details, "\n"),
-						)))
+						))}
 						continue
 					}
 					return err
@@ -165,8 +172,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 				break
 			}
 
-			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
-			messages = append(messages, toolMsgs...)
+			pendingInput = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 		}
 
 		// Update URL in PR description

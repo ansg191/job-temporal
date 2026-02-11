@@ -39,6 +39,7 @@ func main() {
 	w.RegisterWorkflow(agents.BuildAndUploadPDFWorkflow)
 	w.RegisterWorkflow(agents.ReviewAgent)
 	w.RegisterActivity(activities.Greet)
+	w.RegisterActivity(activities.CreateConversation)
 	w.RegisterActivity(activities.CallAI)
 	w.RegisterActivity(activities.ReadFile)
 	w.RegisterActivity(activities.EditFile)

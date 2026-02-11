@@ -106,6 +106,10 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	if err != nil {
 		return 0, err
 	}
+	conversationID, err := createConversation(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
 
 	dispatcher := &githubDispatcher{aiTools: aiTools}
 
@@ -115,31 +119,33 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model: openai.ChatModelGPT5_2,
-				Input: messages,
-				Tools: aiTools,
-				Text:  prOutputFormat,
+				Model:          openai.ChatModelGPT5_2,
+				Input:          messages,
+				Tools:          aiTools,
+				Text:           prOutputFormat,
+				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
 
-		messages = appendOutput(messages, result.Output)
-
 		if hasFunctionCalls(result.Output) {
-			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
-			messages = append(messages, toolMsgs...)
+			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			continue
 		}
 
 		var pr prOutput
 		if err = json.Unmarshal([]byte(result.OutputText()), &pr); err != nil {
-			messages = append(messages, userMessage("Invalid output format: "+err.Error()))
+			messages = responses.ResponseInputParam{
+				userMessage("Invalid output format: " + err.Error()),
+			}
 			continue
 		}
 		if err = validatePRArtifactURL(pr.Body, pdfURL); err != nil {
-			messages = append(messages, userMessage("Invalid PR body: "+err.Error()))
+			messages = responses.ResponseInputParam{
+				userMessage("Invalid PR body: " + err.Error()),
+			}
 			continue
 		}
 

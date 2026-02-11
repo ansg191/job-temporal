@@ -53,6 +53,10 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	conversationID, err := createConversation(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
 
 	dispatcher := &builderDispatcher{
 		aiTools:     aiTools,
@@ -68,20 +72,18 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model: openai.ChatModelGPT5_2,
-				Input: messages,
-				Tools: append(aiTools, tools.BuildToolDesc),
+				Model:          openai.ChatModelGPT5_2,
+				Input:          messages,
+				Tools:          append(aiTools, tools.BuildToolDesc),
+				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
 
-		messages = appendOutput(messages, result.Output)
-
 		if hasFunctionCalls(result.Output) {
-			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
-			messages = append(messages, toolMsgs...)
+			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			continue
 		}
 

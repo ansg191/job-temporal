@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/conversations"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -23,12 +24,17 @@ type ResponseTextFormat struct {
 }
 
 type OpenAIResponsesRequest struct {
-	Model        string                       `json:"model"`
-	Input        responses.ResponseInputParam `json:"input"`
-	Tools        []responses.ToolUnionParam   `json:"tools"`
-	Temperature  param.Opt[float64]           `json:"temperature"`
-	Text         *ResponseTextFormat          `json:"text,omitempty"`
-	Instructions string                       `json:"instructions,omitempty"`
+	Model          string                       `json:"model"`
+	Input          responses.ResponseInputParam `json:"input"`
+	Tools          []responses.ToolUnionParam   `json:"tools"`
+	Temperature    param.Opt[float64]           `json:"temperature"`
+	Text           *ResponseTextFormat          `json:"text,omitempty"`
+	Instructions   string                       `json:"instructions,omitempty"`
+	ConversationID string                       `json:"conversation_id,omitempty"`
+}
+
+type OpenAIConversationRequest struct {
+	Items responses.ResponseInputParam `json:"items,omitempty"`
 }
 
 func GenerateTextFormat[T any](name string) *ResponseTextFormat {
@@ -57,6 +63,14 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 		Tools:       request.Tools,
 		Temperature: request.Temperature,
 		Store:       openai.Bool(false),
+	}
+	if request.ConversationID != "" {
+		params.Conversation = responses.ResponseNewParamsConversationUnion{
+			OfConversationObject: &responses.ResponseConversationParam{
+				ID: request.ConversationID,
+			},
+		}
+		params.Truncation = responses.ResponseNewParamsTruncationAuto
 	}
 
 	if request.Instructions != "" {
@@ -87,7 +101,25 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 	return resp, nil
 }
 
+func CreateConversation(ctx context.Context, request OpenAIConversationRequest) (string, error) {
+	client := openai.NewClient(option.WithMaxRetries(0))
+	params := conversations.ConversationNewParams{
+		Items: request.Items,
+	}
+
+	conversation, err := client.Conversations.New(ctx, params)
+	if err != nil {
+		return "", classifyOpenAIError(err)
+	}
+
+	return conversation.ID, nil
+}
+
 func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAIResponsesRequest) (responses.ResponseInputParam, error) {
+	if request.ConversationID != "" {
+		return request.Input, nil
+	}
+
 	contextWindow, ok := modelContextWindow(request.Model)
 	if !ok {
 		return request.Input, nil
