@@ -85,10 +85,7 @@ func (t *typstBuilder) Build(ctx context.Context, path string, outputPath string
 		if pageCount > t.pageLimit {
 			return &BuildResult{
 				Success: false,
-				Errors: []string{
-					fmt.Sprintf("page limit exceeded: document has %d page(s), maximum allowed is %d",
-						pageCount, t.pageLimit),
-				},
+				Errors:  []string{"page limit exceeded"},
 			}, nil
 		}
 	}

@@ -69,10 +69,25 @@ func runBuild(
 	}
 
 	rootFile := path.Join(repo.Path(), file)
-	b, err := builder.NewBuilder(builderName, builder.WithTypstRootFile(rootFile))
+	pageLimit := pageLimitForBuildFile(file)
+	b, err := builder.NewBuilder(
+		builderName,
+		builder.WithTypstRootFile(rootFile),
+		builder.WithPageLimit(pageLimit),
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	return b.Build(ctx, repo.Path(), outputPath)
+}
+
+func pageLimitForBuildFile(file string) int {
+	switch file {
+	case "resume.typ":
+		// Allow resume generation/review passes to overshoot by one page.
+		return 2
+	default:
+		return 1
+	}
 }
