@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/jobsource"
 	"github.com/ansg191/job-temporal/internal/workflows"
 )
 
@@ -28,7 +29,19 @@ func main() {
 		TaskQueue: "my-task-queue",
 	}
 
-	log.Println("Starting workflow", os.Args[1])
+	if len(os.Args) < 2 {
+		log.Fatalln("Usage: go run ./cmd/start/main.go '<job description or job URL>'")
+	}
+
+	input := os.Args[1]
+	resolver := jobsource.NewDefaultResolver()
+
+	jobDesc, err := resolver.Resolve(ctx, input)
+	if err != nil {
+		log.Fatalln("Unable to resolve job description", err)
+	}
+
+	log.Println("Starting workflow with resolved job description")
 	we, err := c.ExecuteWorkflow(
 		ctx,
 		options,
@@ -38,7 +51,7 @@ func main() {
 				Owner: "ansg191",
 				Repo:  "resume",
 			},
-			JobDesc: os.Args[1],
+			JobDesc: jobDesc,
 		},
 	)
 	if err != nil {
