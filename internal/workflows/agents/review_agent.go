@@ -2,13 +2,16 @@ package agents
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
@@ -115,6 +118,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 			buildTarget: args.BuildTarget,
 		}
 
+		var pdfUrl string
 		for {
 			var result *responses.Response
 			err = workflow.ExecuteActivity(
@@ -133,11 +137,42 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 			messages = appendOutput(messages, result.Output)
 
 			if !hasFunctionCalls(result.Output) {
+				// Finished with agent loop, rebuild the PDF
+				err = workflow.ExecuteChildWorkflow(
+					ctx,
+					BuildAndUploadPDFWorkflow,
+					BuildAndUploadPDFWorkflowRequest{
+						ClientOptions: args.Repo,
+						Branch:        args.BranchName,
+						Builder:       "typst", // TODO: remove this hardcoded builder
+						BuildTarget:   args.BuildTarget,
+					},
+				).Get(ctx, &pdfUrl)
+				if err != nil {
+					var appErr *temporal.ApplicationError
+					if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
+						// Build failed, so kick back to Ai to fix
+						var details []string
+						_ = appErr.Details(&details)
+						messages = append(messages, userMessage(fmt.Sprintf(
+							"Build failed, fix and try again: \n%s",
+							strings.Join(details, "\n"),
+						)))
+						continue
+					}
+					return err
+				}
 				break
 			}
 
 			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			messages = append(messages, toolMsgs...)
+		}
+
+		// Update URL in PR description
+		err = updatePRDescription(ctx, args.Repo, args.Pr, pdfUrl)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -172,11 +207,65 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 		req := activities.BuildRequest{
 			ClientOptions: d.ghOpts,
 			Branch:        d.branchName,
-			Builder:       "typst",
+			Builder:       "typst", // TODO: remove this hardcoded builder
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
+}
+
+func updatePRDescription(ctx workflow.Context, repo github.ClientOptions, pr int, url string) error {
+	// Get existing PR description
+	var body string
+	err := workflow.ExecuteActivity(
+		ctx,
+		activities.GetPullRequestBody,
+		activities.GetPullRequestBodyRequest{
+			ClientOptions: repo,
+			PRNumber:      pr,
+		},
+	).Get(ctx, &body)
+	if err != nil {
+		return err
+	}
+
+	// Find existing PDF URL via prefix
+	var oldUrl string
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prArtifactLinePrefix) {
+			oldUrl = strings.TrimSpace(line[len(prArtifactLinePrefix):])
+			lines[i] = prArtifactLinePrefix + " " + url
+			break
+		}
+	}
+	if oldUrl == "" {
+		workflow.GetLogger(ctx).Warn("No existing artifact URL found in PR description")
+		lines = append(lines, prArtifactLinePrefix+" "+url)
+	}
+	body = strings.Join(lines, "\n")
+
+	// Delete old PDF URL from bucket
+	err = workflow.ExecuteActivity(
+		ctx,
+		activities.DeletePDFByURL,
+		activities.DeletePDFByURLRequest{URL: oldUrl},
+	).Get(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	// Update PR description
+	return workflow.ExecuteActivity(
+		ctx,
+		activities.UpdatePullRequestBody,
+		activities.UpdatePullRequestBodyRequest{
+			ClientOptions: repo,
+			PRNumber:      pr,
+			Body:          body,
+		},
+	).Get(ctx, nil)
 }

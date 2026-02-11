@@ -14,9 +14,12 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/ansg191/job-temporal/internal/github"
 )
+
+const ErrTypeBuildFailed = "BuildFailed"
 
 type BuildFinalPDFRequest struct {
 	github.ClientOptions
@@ -40,7 +43,12 @@ func BuildFinalPDF(ctx context.Context, req BuildFinalPDFRequest) ([]byte, error
 		return nil, err
 	}
 	if !buildResult.Success {
-		return nil, fmt.Errorf("build failed: %s", strings.Join(buildResult.Errors, "\n"))
+		return nil, temporal.NewNonRetryableApplicationError(
+			"build failed",
+			ErrTypeBuildFailed,
+			nil,
+			buildResult.Errors,
+		)
 	}
 
 	return os.ReadFile(tmpFile.Name())
