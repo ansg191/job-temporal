@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/openai/openai-go/v3"
@@ -52,13 +51,9 @@ func GenerateTextFormat[T any](name string) *ResponseTextFormat {
 
 func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Response, error) {
 	client := openai.NewClient(option.WithMaxRetries(0))
-	input, err := maybeCompactInput(ctx, client, request)
-	if err != nil {
-		return nil, classifyOpenAIError(err)
-	}
 
 	params := responses.ResponseNewParams{
-		Input:       responses.ResponseNewParamsInputUnion{OfInputItemList: input},
+		Input:       responses.ResponseNewParamsInputUnion{OfInputItemList: request.Input},
 		Model:       request.Model,
 		Tools:       request.Tools,
 		Temperature: request.Temperature,
@@ -94,7 +89,7 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 		}
 	}
 
-	resp, err := client.Responses.New(ctx, params)
+	resp, err := client.Responses.New(ctx, params, contextManagementOptions(request.Model)...)
 	if err != nil {
 		return nil, classifyOpenAIError(err)
 	}
@@ -115,71 +110,21 @@ func CreateConversation(ctx context.Context, request OpenAIConversationRequest) 
 	return conversation.ID, nil
 }
 
-func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAIResponsesRequest) (responses.ResponseInputParam, error) {
-	if request.ConversationID != "" {
-		return request.Input, nil
-	}
-
-	contextWindow, ok := modelContextWindow(request.Model)
+func contextManagementOptions(model string) []option.RequestOption {
+	contextWindow, ok := modelContextWindow(model)
 	if !ok {
-		return request.Input, nil
-	}
-
-	tokenCountParams := responses.InputTokenCountParams{
-		Model: openai.String(request.Model),
-		Input: responses.InputTokenCountParamsInputUnion{OfResponseInputItemArray: request.Input},
-		Tools: request.Tools,
-	}
-	if request.Instructions != "" {
-		tokenCountParams.Instructions = openai.String(request.Instructions)
-	}
-	if request.Text != nil {
-		schemaMap, err := toSchemaMap(request.Text.Schema)
-		if err != nil {
-			return nil, err
-		}
-		tokenCountParams.Text = responses.InputTokenCountParamsText{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:   request.Text.Name,
-					Schema: schemaMap,
-					Strict: openai.Bool(request.Text.Strict),
-				},
-			},
-		}
-	}
-
-	tokenCount, err := client.Responses.InputTokens.Count(ctx, tokenCountParams)
-	if err != nil {
-		return nil, classifyOpenAIError(err)
+		return nil
 	}
 
 	threshold := contextWindow / 2
-	if tokenCount.InputTokens <= threshold {
-		return request.Input, nil
+	return []option.RequestOption{
+		option.WithJSONSet("context_management", []map[string]any{
+			{
+				"type":              "compaction",
+				"compact_threshold": threshold,
+			},
+		}),
 	}
-
-	slog.Info(
-		"openai context compaction triggered",
-		"model", request.Model,
-		"input_tokens", tokenCount.InputTokens,
-		"threshold", threshold,
-	)
-
-	compactParams := responses.ResponseCompactParams{
-		Model: responses.ResponseCompactParamsModel(request.Model),
-		Input: responses.ResponseCompactParamsInputUnion{OfResponseInputItemArray: request.Input},
-	}
-	if request.Instructions != "" {
-		compactParams.Instructions = openai.String(request.Instructions)
-	}
-
-	compacted, err := client.Responses.Compact(ctx, compactParams)
-	if err != nil {
-		return nil, classifyOpenAIError(err)
-	}
-
-	return compactedOutputToInput(compacted.Output), nil
 }
 
 func classifyOpenAIError(err error) error {
@@ -209,14 +154,6 @@ func modelContextWindow(model string) (int64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func compactedOutputToInput(output []responses.ResponseOutputItemUnion) responses.ResponseInputParam {
-	input := make(responses.ResponseInputParam, 0, len(output))
-	for _, item := range output {
-		input = append(input, param.Override[responses.ResponseInputItemUnionParam](json.RawMessage(item.RawJSON())))
-	}
-	return input
 }
 
 // toSchemaMap converts an arbitrary schema value to map[string]any via a JSON

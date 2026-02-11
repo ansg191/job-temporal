@@ -1,11 +1,9 @@
 package activities
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 )
 
 func TestModelContextWindow(t *testing.T) {
@@ -25,47 +23,16 @@ func TestModelContextWindow(t *testing.T) {
 	}
 }
 
-func TestCompactedOutputToInput(t *testing.T) {
+func TestContextManagementOptions(t *testing.T) {
 	t.Parallel()
 
-	rawOutput := `[
-		{
-			"type":"message",
-			"id":"msg_1",
-			"role":"user",
-			"status":"completed",
-			"content":[{"type":"input_text","text":"hello"}]
-		},
-		{
-			"type":"compaction",
-			"id":"comp_1",
-			"encrypted_content":"enc_123"
-		}
-	]`
-
-	var output []responses.ResponseOutputItemUnion
-	if err := json.Unmarshal([]byte(rawOutput), &output); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
+	opts := contextManagementOptions(openai.ChatModelGPT5_2)
+	if len(opts) == 0 {
+		t.Fatalf("expected context management options for supported model")
 	}
 
-	input := compactedOutputToInput(output)
-	if len(input) != 2 {
-		t.Fatalf("expected 2 input items, got %d", len(input))
-	}
-
-	firstJSON, err := json.Marshal(input[0])
-	if err != nil {
-		t.Fatalf("marshal first item: %v", err)
-	}
-	if string(firstJSON) != `{"type":"message","id":"msg_1","role":"user","status":"completed","content":[{"type":"input_text","text":"hello"}]}` {
-		t.Fatalf("unexpected first item json: %s", string(firstJSON))
-	}
-
-	secondJSON, err := json.Marshal(input[1])
-	if err != nil {
-		t.Fatalf("marshal second item: %v", err)
-	}
-	if string(secondJSON) != `{"type":"compaction","id":"comp_1","encrypted_content":"enc_123"}` {
-		t.Fatalf("unexpected second item json: %s", string(secondJSON))
+	opts = contextManagementOptions("unknown-model")
+	if len(opts) != 0 {
+		t.Fatalf("expected no context management options for unsupported model")
 	}
 }
