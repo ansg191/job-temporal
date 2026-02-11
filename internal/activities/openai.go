@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/openai/openai-go/v3"
@@ -11,6 +15,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 )
 
@@ -36,6 +41,9 @@ type OpenAIConversationRequest struct {
 	Items responses.ResponseInputParam `json:"items,omitempty"`
 }
 
+const aiPollInterval = 1 * time.Second
+const aiPollRequestTimeout = 2 * time.Second
+
 func GenerateTextFormat[T any](name string) *ResponseTextFormat {
 	schema, err := jsonschema.For[T](nil)
 	if err != nil {
@@ -58,6 +66,7 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 		Tools:       request.Tools,
 		Temperature: request.Temperature,
 		Store:       openai.Bool(false),
+		Background:  openai.Bool(true),
 	}
 	if request.ConversationID != "" {
 		params.Conversation = responses.ResponseNewParamsConversationUnion{
@@ -93,7 +102,105 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 	if err != nil {
 		return nil, classifyOpenAIError(err)
 	}
-	return resp, nil
+
+	return waitForBackgroundResponse(ctx, client, resp)
+}
+
+func waitForBackgroundResponse(ctx context.Context, client openai.Client, resp *responses.Response) (*responses.Response, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("openai background response is nil")
+	}
+
+	responseID := resp.ID
+	if responseID == "" {
+		return nil, fmt.Errorf("openai background response missing id")
+	}
+
+	ticker := time.NewTicker(aiPollInterval)
+	defer ticker.Stop()
+	var err error
+
+	for {
+		activity.RecordHeartbeat(ctx, map[string]any{
+			"response_id": responseID,
+			"status":      string(resp.Status),
+		})
+
+		switch resp.Status {
+		case responses.ResponseStatusCompleted:
+			return resp, nil
+		case responses.ResponseStatusFailed, responses.ResponseStatusCancelled, responses.ResponseStatusIncomplete:
+			return nil, temporal.NewApplicationError(
+				fmt.Sprintf("openai background response ended with status %q", resp.Status),
+				"OpenAIBackgroundResponseError",
+				resp.Status,
+				resp.IncompleteDetails,
+				resp.Error,
+			)
+		}
+
+		select {
+		case <-ctx.Done():
+			cancelOpenAIBackgroundResponse(responseID, client)
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+
+		pollCtx, cancel := context.WithTimeout(ctx, aiPollRequestTimeout)
+		resp, err = client.Responses.Get(pollCtx, responseID, responses.ResponseGetParams{})
+		cancel()
+		if err != nil {
+			// If the parent activity context is canceled/deadline-exceeded, stop polling
+			// and cancel the background response.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if parentErr := ctx.Err(); parentErr != nil {
+					cancelOpenAIBackgroundResponse(responseID, client)
+					return nil, parentErr
+				}
+			}
+
+			if isTransientPollError(err) {
+				slog.Warn("openai background poll failed, retrying", "response_id", responseID, "error", err)
+				continue
+			}
+
+			return nil, classifyOpenAIError(err)
+		}
+	}
+}
+
+func isTransientPollError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+	}
+
+	return false
+}
+
+func cancelOpenAIBackgroundResponse(responseID string, client openai.Client) {
+	if responseID == "" {
+		return
+	}
+
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.Responses.Cancel(cancelCtx, responseID); err != nil {
+		slog.Warn("failed to cancel openai background response", "response_id", responseID, "error", err)
+	}
 }
 
 func CreateConversation(ctx context.Context, request OpenAIConversationRequest) (string, error) {

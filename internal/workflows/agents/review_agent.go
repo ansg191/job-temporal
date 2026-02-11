@@ -87,6 +87,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	if err != nil {
 		return err
 	}
+	callAICtx := withCallAIActivityOptions(ctx)
 	initialized := false
 
 	for {
@@ -130,7 +131,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		for {
 			var result *responses.Response
 			err = workflow.ExecuteActivity(
-				ctx,
+				callAICtx,
 				activities.CallAI,
 				activities.OpenAIResponsesRequest{
 					Model:          openai.ChatModelGPT5_2,

@@ -110,13 +110,14 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	if err != nil {
 		return 0, err
 	}
+	callAICtx := withCallAIActivityOptions(ctx)
 
 	dispatcher := &githubDispatcher{aiTools: aiTools}
 
 	for {
 		var result *responses.Response
 		err = workflow.ExecuteActivity(
-			ctx,
+			callAICtx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
 				Model:          openai.ChatModelGPT5_2,

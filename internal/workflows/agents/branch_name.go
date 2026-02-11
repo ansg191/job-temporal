@@ -71,11 +71,12 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 	if err != nil {
 		return "", err
 	}
+	callAICtx := withCallAIActivityOptions(ctx)
 
 	for range 5 {
 		var result *responses.Response
 		err = workflow.ExecuteActivity(
-			ctx,
+			callAICtx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
 				Model: openai.ChatModelGPT5_2,

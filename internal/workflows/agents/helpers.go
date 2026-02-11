@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"time"
+
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
@@ -57,4 +59,11 @@ func createConversation(ctx workflow.Context, items responses.ResponseInputParam
 		return "", err
 	}
 	return conversationID, nil
+}
+
+func withCallAIActivityOptions(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 15 * time.Minute,
+		HeartbeatTimeout:    10 * time.Second,
+	})
 }
