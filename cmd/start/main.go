@@ -30,7 +30,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		log.Fatalln("Usage: go run ./cmd/start/main.go '<job description or job URL>'")
+		log.Fatalln("Usage: go run ./cmd/start/main.go '<job URL>'")
 	}
 
 	input := os.Args[1]

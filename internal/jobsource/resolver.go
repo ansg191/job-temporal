@@ -19,8 +19,7 @@ type Strategy interface {
 	Fetch(ctx context.Context, u *url.URL) (string, error)
 }
 
-// Resolver picks a matching job-source strategy for URL inputs and
-// preserves raw text inputs unchanged.
+// Resolver picks a matching job-source strategy for URL inputs.
 type Resolver struct {
 	strategies []Strategy
 }
@@ -42,7 +41,7 @@ func NewDefaultResolver() *Resolver {
 }
 
 // Resolve converts user input to a job description.
-// Non-URL input is returned as-is (trimmed) to preserve existing CLI behavior.
+// Input must be an absolute URL supported by one of the configured strategies.
 func (r *Resolver) Resolve(ctx context.Context, input string) (string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -51,8 +50,7 @@ func (r *Resolver) Resolve(ctx context.Context, input string) (string, error) {
 
 	u, err := parseAbsoluteURL(trimmed)
 	if err != nil {
-		// Preserve existing behavior: non-URL input is treated as raw job text.
-		return trimmed, nil
+		return "", fmt.Errorf("input must be a supported job URL: %w", err)
 	}
 
 	for _, strategy := range r.strategies {

@@ -25,16 +25,13 @@ func (s stubStrategy) Fetch(_ context.Context, _ *url.URL) (string, error) {
 	return s.result, s.err
 }
 
-func TestResolverResolveRawText(t *testing.T) {
+func TestResolverResolveRawTextReturnsError(t *testing.T) {
 	t.Parallel()
 
 	r := NewResolver()
-	got, err := r.Resolve(context.Background(), " Senior backend engineer in Go ")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
-	}
-	if got != "Senior backend engineer in Go" {
-		t.Fatalf("Resolve = %q, want %q", got, "Senior backend engineer in Go")
+	_, err := r.Resolve(context.Background(), " Senior backend engineer in Go ")
+	if err == nil {
+		t.Fatalf("expected error for non-URL input")
 	}
 }
 
