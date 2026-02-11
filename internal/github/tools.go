@@ -6,9 +6,8 @@ import (
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/shared"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 const DefaultGithubURL = "https://api.githubcopilot.com/mcp"
@@ -46,22 +45,22 @@ func NewTools(ctx context.Context, url string) (*Tools, error) {
 	return &Tools{session}, nil
 }
 
-// OpenAITools returns all available tools as OpenAI ChatCompletionToolUnionParam slice.
-func (t *Tools) OpenAITools(ctx context.Context) ([]openai.ChatCompletionToolUnionParam, error) {
+// OpenAITools returns all available tools as a responses.ToolUnionParam slice.
+func (t *Tools) OpenAITools(ctx context.Context) ([]responses.ToolUnionParam, error) {
 	result, err := t.ListTools(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	tools := make([]openai.ChatCompletionToolUnionParam, 0, len(result.Tools))
+	tools := make([]responses.ToolUnionParam, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		tools = append(tools, mcpToolToOpenAI(tool))
 	}
 	return tools, nil
 }
 
-func mcpToolToOpenAI(tool *mcp.Tool) openai.ChatCompletionToolUnionParam {
-	fn := shared.FunctionDefinitionParam{
+func mcpToolToOpenAI(tool *mcp.Tool) responses.ToolUnionParam {
+	fn := responses.FunctionToolParam{
 		Name: tool.Name,
 	}
 
@@ -73,5 +72,5 @@ func mcpToolToOpenAI(tool *mcp.Tool) openai.ChatCompletionToolUnionParam {
 		fn.Parameters = schema
 	}
 
-	return openai.ChatCompletionFunctionTool(fn)
+	return responses.ToolUnionParam{OfFunction: &fn}
 }

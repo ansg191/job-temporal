@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
@@ -19,7 +20,7 @@ type prOutput struct {
 	Body  string `json:"body"`
 }
 
-var prOutputFormat = activities.GenerateResponseFormat[prOutput]("pr_output")
+var prOutputFormat = activities.GenerateTextFormat[prOutput]("pr_output")
 
 const PullRequestInstructions = `
 You are a pull request agent who creates pull requests for the repository.
@@ -29,7 +30,7 @@ These agent's took a job application, and tailored a resume for that specific jo
 CORE RESPONSIBILITIES:
 1. Given a branch name, create a pull request description and title for the repository.
 2. Give the pull request a descriptive title and description based on the changes made in the branch.
-3. Be very descriptive in the pull request description. Try to explain every change and why it was done using the 
+3. Be very descriptive in the pull request description. Try to explain every change and why it was done using the
 changes, commit history, & job description.
 4. Return the description and title in the provided output format.
 
@@ -60,11 +61,11 @@ type PullRequestAgentRequest struct {
 }
 
 func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, error) {
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(PullRequestInstructions),
-		openai.UserMessage("Remote: " + req.Owner + "/" + req.Repo),
-		openai.UserMessage("Branch Name: " + req.Branch),
-		openai.UserMessage("Job description: " + req.Job),
+	messages := responses.ResponseInputParam{
+		systemMessage(PullRequestInstructions),
+		userMessage("Remote: " + req.Owner + "/" + req.Repo),
+		userMessage("Branch Name: " + req.Branch),
+		userMessage("Job description: " + req.Job),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -72,7 +73,7 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	var aiTools []openai.ChatCompletionToolUnionParam
+	var aiTools []responses.ToolUnionParam
 	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
@@ -81,32 +82,32 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	dispatcher := &githubDispatcher{aiTools: aiTools}
 
 	for {
-		var result *openai.ChatCompletion
+		var result *responses.Response
 		err = workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:          openai.ChatModelGPT5_2,
-				Messages:       messages,
-				Tools:          aiTools,
-				ResponseFormat: prOutputFormat,
+				Model: openai.ChatModelGPT5_2,
+				Input: messages,
+				Tools: aiTools,
+				Text:  prOutputFormat,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
 
-		messages = append(messages, result.Choices[0].Message.ToParam())
+		messages = appendOutput(messages, result.Output)
 
-		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
+		if hasFunctionCalls(result.Output) {
+			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
 
 		var pr prOutput
-		if err = json.Unmarshal([]byte(result.Choices[0].Message.Content), &pr); err != nil {
-			messages = append(messages, openai.UserMessage("Invalid output format: "+err.Error()))
+		if err = json.Unmarshal([]byte(result.OutputText()), &pr); err != nil {
+			messages = append(messages, userMessage("Invalid output format: "+err.Error()))
 			continue
 		}
 
@@ -126,14 +127,14 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 }
 
 type githubDispatcher struct {
-	aiTools []openai.ChatCompletionToolUnionParam
+	aiTools []responses.ToolUnionParam
 }
 
-func (d *githubDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-		return param.GetFunction().Name == call.Function.Name
+func (d *githubDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
+		return param.OfFunction != nil && param.OfFunction.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
-	return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+	return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 }

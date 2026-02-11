@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 )
@@ -26,22 +27,20 @@ func ReadToolParseArgs(args string, req *activities.ReadFileRequest) error {
 	return nil
 }
 
-var ReadFileToolDesc = openai.ChatCompletionToolUnionParam{
-	OfFunction: &openai.ChatCompletionFunctionToolParam{
-		Function: openai.FunctionDefinitionParam{
-			Name:        "read_file",
-			Strict:      openai.Bool(true),
-			Description: openai.String("Read the contents of a file from the current directory"),
-			Parameters: openai.FunctionParameters{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"file": map[string]string{
-						"type": "string",
-					},
+var ReadFileToolDesc = responses.ToolUnionParam{
+	OfFunction: &responses.FunctionToolParam{
+		Name:        "read_file",
+		Strict:      openai.Bool(true),
+		Description: openai.String("Read the contents of a file from the current directory"),
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"file": map[string]string{
+					"type": "string",
 				},
-				"required":             []string{"file"},
-				"additionalProperties": false,
 			},
+			"required":             []string{"file"},
+			"additionalProperties": false,
 		},
 	},
 }
@@ -67,22 +66,21 @@ func EditToolParseArgs(args string, req *activities.EditFileRequest) error {
 	return nil
 }
 
-var EditFileToolDesc = openai.ChatCompletionToolUnionParam{
-	OfFunction: &openai.ChatCompletionFunctionToolParam{
-		Function: openai.FunctionDefinitionParam{
-			Name:        "edit_file",
-			Strict:      openai.Bool(true),
-			Description: openai.String("Edit the contents of a file in the current directory"),
-			Parameters: openai.FunctionParameters{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"file": map[string]string{
-						"type":        "string",
-						"description": "The path to the file to edit",
-					},
-					"patch": map[string]string{
-						"type":        "string",
-						"description": `A unified diff patch in git diff format. Structure:
+var EditFileToolDesc = responses.ToolUnionParam{
+	OfFunction: &responses.FunctionToolParam{
+		Name:        "edit_file",
+		Strict:      openai.Bool(true),
+		Description: openai.String("Edit the contents of a file in the current directory"),
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"file": map[string]string{
+					"type":        "string",
+					"description": "The path to the file to edit",
+				},
+				"patch": map[string]string{
+					"type":        "string",
+					"description": `A unified diff patch in git diff format. Structure:
 1. File headers: '--- a/file' and '+++ b/file'
 2. Hunk header: '@@ -OLD_START,OLD_COUNT +NEW_START,NEW_COUNT @@' where OLD_COUNT is the exact number of lines starting with ' ' or '-', and NEW_COUNT is the exact number of lines starting with ' ' or '+'.
 3. Hunk body: Lines prefixed with ' ' (context/unchanged), '-' (removed), or '+' (added).
@@ -91,15 +89,14 @@ CRITICAL RULES:
 - The counts MUST match the actual line counts in the hunk body. For a single-line change, use '@@ -N +N @@' (omit count when it equals 1).
 - Lines prefixed with '-' MUST be copied EXACTLY (character-for-character, including all whitespace) from the file. Do NOT paraphrase or retype from memory. Any mismatch will cause the patch to fail.
 - Always read_file first and copy the exact line content for '-' lines.`,
-					},
-					"message": map[string]string{
-						"type":        "string",
-						"description": "The commit message for this edit",
-					},
 				},
-				"required":             []string{"file", "patch", "message"},
-				"additionalProperties": false,
+				"message": map[string]string{
+					"type":        "string",
+					"description": "The commit message for this edit",
+				},
 			},
+			"required":             []string{"file", "patch", "message"},
+			"additionalProperties": false,
 		},
 	},
 }
@@ -129,39 +126,37 @@ func EditLineToolParseArgs(args string, req *activities.EditLineRequest) error {
 	return nil
 }
 
-var EditLineToolDesc = openai.ChatCompletionToolUnionParam{
-	OfFunction: &openai.ChatCompletionFunctionToolParam{
-		Function: openai.FunctionDefinitionParam{
-			Name:        "edit_line",
-			Strict:      openai.Bool(true),
-			Description: openai.String("Edit lines in a file by specifying line numbers and replacement content"),
-			Parameters: openai.FunctionParameters{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"file": map[string]string{
-						"type":        "string",
-						"description": "The path to the file to edit",
-					},
-					"start_line": map[string]string{
-						"type":        "integer",
-						"description": "Starting line number (1-indexed)",
-					},
-					"end_line": map[string]string{
-						"type":        "integer",
-						"description": "Ending line number (1-indexed, inclusive). Use start_line-1 to insert before start_line",
-					},
-					"new_content": map[string]string{
-						"type":        "string",
-						"description": "The replacement content. Use empty string to delete lines",
-					},
-					"message": map[string]string{
-						"type":        "string",
-						"description": "The commit message for this edit",
-					},
+var EditLineToolDesc = responses.ToolUnionParam{
+	OfFunction: &responses.FunctionToolParam{
+		Name:        "edit_line",
+		Strict:      openai.Bool(true),
+		Description: openai.String("Edit lines in a file by specifying line numbers and replacement content"),
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"file": map[string]string{
+					"type":        "string",
+					"description": "The path to the file to edit",
 				},
-				"required":             []string{"file", "start_line", "end_line", "new_content", "message"},
-				"additionalProperties": false,
+				"start_line": map[string]string{
+					"type":        "integer",
+					"description": "Starting line number (1-indexed)",
+				},
+				"end_line": map[string]string{
+					"type":        "integer",
+					"description": "Ending line number (1-indexed, inclusive). Use start_line-1 to insert before start_line",
+				},
+				"new_content": map[string]string{
+					"type":        "string",
+					"description": "The replacement content. Use empty string to delete lines",
+				},
+				"message": map[string]string{
+					"type":        "string",
+					"description": "The commit message for this edit",
+				},
 			},
+			"required":             []string{"file", "start_line", "end_line", "new_content", "message"},
+			"additionalProperties": false,
 		},
 	},
 }

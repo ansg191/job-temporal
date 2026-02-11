@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
@@ -67,14 +68,14 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	// Get signal channel
 	ch := workflow.GetSignalChannel(ctx, webhook.ReviewAgentSignal)
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(ReviewAgentInstructions),
-		openai.UserMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
-		openai.UserMessage("Pull Request: " + strconv.Itoa(args.Pr)),
-		openai.UserMessage("Branch Name: " + args.BranchName),
+	messages := responses.ResponseInputParam{
+		systemMessage(ReviewAgentInstructions),
+		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
+		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
+		userMessage("Branch Name: " + args.BranchName),
 	}
 
-	var aiTools []openai.ChatCompletionToolUnionParam
+	var aiTools []responses.ToolUnionParam
 	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return err
@@ -104,7 +105,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
 		messages = append(
 			messages,
-			openai.UserMessage("User Review: "+string(signalBytes)),
+			userMessage("User Review: "+string(signalBytes)),
 		)
 
 		dispatcher := &reviewAgentDispatcher{
@@ -115,27 +116,27 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		}
 
 		for {
-			var result *openai.ChatCompletion
+			var result *responses.Response
 			err = workflow.ExecuteActivity(
 				ctx,
 				activities.CallAI,
 				activities.OpenAIResponsesRequest{
-					Model:    openai.ChatModelGPT5_2,
-					Messages: messages,
-					Tools:    append(aiTools, tools.BuildToolDesc),
+					Model: openai.ChatModelGPT5_2,
+					Input: messages,
+					Tools: append(aiTools, tools.BuildToolDesc),
 				},
 			).Get(ctx, &result)
 			if err != nil {
 				return err
 			}
 
-			messages = append(messages, result.Choices[0].Message.ToParam())
+			messages = appendOutput(messages, result.Output)
 
-			if result.Choices[0].FinishReason != "tool_calls" {
+			if !hasFunctionCalls(result.Output) {
 				break
 			}
 
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
+			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			messages = append(messages, toolMsgs...)
 		}
 	}
@@ -145,21 +146,21 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 }
 
 type reviewAgentDispatcher struct {
-	aiTools     []openai.ChatCompletionToolUnionParam
+	aiTools     []responses.ToolUnionParam
 	ghOpts      github.ClientOptions
 	branchName  string
 	buildTarget BuildTarget
 }
 
-func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-		return param.GetFunction().Name == call.Function.Name
+func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
+		return param.OfFunction != nil && param.OfFunction.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
 
-	switch call.Function.Name {
-	case tools.BuildToolDesc.OfFunction.Function.Name:
+	switch call.Name {
+	case tools.BuildToolDesc.OfFunction.Name:
 		var file string
 		switch d.buildTarget {
 		case BuildTargetResume:
@@ -176,6 +177,6 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call openai.ChatC
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:
-		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
 }

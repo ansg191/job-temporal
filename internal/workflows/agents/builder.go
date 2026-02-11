@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
@@ -35,11 +36,11 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		return 0, fmt.Errorf("invalid build target: %d", req.BuildTarget)
 	}
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(instructions),
-		openai.UserMessage("Remote: " + req.Owner + "/" + req.Repo),
-		openai.UserMessage("Branch Name: " + req.BranchName),
-		openai.UserMessage("Job Application:\n" + req.Job),
+	messages := responses.ResponseInputParam{
+		systemMessage(instructions),
+		userMessage("Remote: " + req.Owner + "/" + req.Repo),
+		userMessage("Branch Name: " + req.BranchName),
+		userMessage("Job Application:\n" + req.Job),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -47,7 +48,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	var aiTools []openai.ChatCompletionToolUnionParam
+	var aiTools []responses.ToolUnionParam
 	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
@@ -62,24 +63,24 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	}
 
 	for {
-		var result *openai.ChatCompletion
+		var result *responses.Response
 		err = workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:    openai.ChatModelGPT5_2,
-				Messages: messages,
-				Tools:    append(aiTools, tools.BuildToolDesc),
+				Model: openai.ChatModelGPT5_2,
+				Input: messages,
+				Tools: append(aiTools, tools.BuildToolDesc),
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
 
-		messages = append(messages, result.Choices[0].Message.ToParam())
+		messages = appendOutput(messages, result.Output)
 
-		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
+		if hasFunctionCalls(result.Output) {
+			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
@@ -105,22 +106,22 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 }
 
 type builderDispatcher struct {
-	aiTools     []openai.ChatCompletionToolUnionParam
+	aiTools     []responses.ToolUnionParam
 	ghOpts      github.ClientOptions
 	branchName  string
 	builder     string
 	buildTarget BuildTarget
 }
 
-func (d *builderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param openai.ChatCompletionToolUnionParam) bool {
-		return param.GetFunction().Name == call.Function.Name
+func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
+		return param.OfFunction != nil && param.OfFunction.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
 
-	switch call.Function.Name {
-	case tools.BuildToolDesc.OfFunction.Function.Name:
+	switch call.Name {
+	case tools.BuildToolDesc.OfFunction.Name:
 		var file string
 		switch d.buildTarget {
 		case BuildTargetResume:
@@ -137,7 +138,7 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompl
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
 	default:
-		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
 }
 

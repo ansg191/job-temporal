@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
@@ -54,10 +55,10 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 		return "", temporal.NewNonRetryableApplicationError("invalid purpose", "InvalidPurpose", nil)
 	}
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(branchNameAgentInstructions),
-		openai.UserMessage("Purpose: " + string(req.Purpose)),
-		openai.UserMessage("Job Description:\n" + req.JobDescription),
+	messages := responses.ResponseInputParam{
+		systemMessage(branchNameAgentInstructions),
+		userMessage("Purpose: " + string(req.Purpose)),
+		userMessage("Job Description:\n" + req.JobDescription),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -68,14 +69,14 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 	dispatcher := &branchNameDispatcher{ghOpts: req.ClientOptions}
 
 	for range 5 {
-		var result *openai.ChatCompletion
+		var result *responses.Response
 		err := workflow.ExecuteActivity(
 			ctx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:    openai.ChatModelGPT5_2,
-				Messages: messages,
-				Tools: []openai.ChatCompletionToolUnionParam{
+				Model: openai.ChatModelGPT5_2,
+				Input: messages,
+				Tools: []responses.ToolUnionParam{
 					tools.ListBranchesToolDesc,
 				},
 				Temperature: openai.Float(0),
@@ -85,15 +86,15 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 			return "", err
 		}
 
-		messages = append(messages, result.Choices[0].Message.ToParam())
+		messages = appendOutput(messages, result.Output)
 
-		if result.Choices[0].FinishReason == "tool_calls" {
-			toolMsgs := tools.ProcessToolCalls(ctx, result.Choices[0].Message.ToolCalls, dispatcher)
+		if hasFunctionCalls(result.Output) {
+			toolMsgs := tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			messages = append(messages, toolMsgs...)
 			continue
 		}
 
-		branchName := result.Choices[0].Message.Content
+		branchName := result.OutputText()
 
 		req := activities.CreateBranchRequest{
 			ClientOptions: req.ClientOptions,
@@ -101,7 +102,7 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 		}
 		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
 		if err != nil {
-			messages = append(messages, openai.UserMessage("Unable to create branch: "+err.Error()+"\n"))
+			messages = append(messages, userMessage("Unable to create branch: "+err.Error()+"\n"))
 			continue
 		}
 		return branchName, nil
@@ -114,12 +115,12 @@ type branchNameDispatcher struct {
 	ghOpts github.ClientOptions
 }
 
-func (d *branchNameDispatcher) Dispatch(ctx workflow.Context, call openai.ChatCompletionMessageToolCallUnion) (workflow.Future, error) {
-	switch call.Function.Name {
-	case tools.ListBranchesToolDesc.OfFunction.Function.Name:
+func (d *branchNameDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
+	switch call.Name {
+	case tools.ListBranchesToolDesc.OfFunction.Name:
 		req := activities.ListBranchesRequest{ClientOptions: d.ghOpts}
 		return workflow.ExecuteActivity(ctx, activities.ListBranches, req), nil
 	default:
-		return nil, fmt.Errorf("unsupported tool: %s", call.Function.Name)
+		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
 }

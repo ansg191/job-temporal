@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/ansg191/job-temporal/internal/github"
 )
 
-func ListGithubTools(ctx context.Context) ([]openai.ChatCompletionToolUnionParam, error) {
+func ListGithubTools(ctx context.Context) ([]responses.ToolUnionParam, error) {
 	gh, err := github.NewTools(ctx, github.DefaultGithubURL)
 	if err != nil {
 		return nil, err
@@ -24,16 +24,16 @@ func ListGithubTools(ctx context.Context) ([]openai.ChatCompletionToolUnionParam
 	return gh.OpenAITools(ctx)
 }
 
-func CallGithubTool(ctx context.Context, call openai.ChatCompletionMessageToolCallUnion) (string, error) {
+func CallGithubTool(ctx context.Context, call responses.ResponseOutputItemUnion) (string, error) {
 	gh, err := github.NewTools(ctx, github.DefaultGithubURL)
 	if err != nil {
 		return "", err
 	}
 	defer gh.Close()
 
-	log.Println(call.Function.Name, call.Function.Arguments)
+	log.Println(call.Name, call.Arguments)
 
-	args, err := parseArgs(call.Function.Arguments)
+	args, err := parseArgs(call.Arguments)
 	if err != nil {
 		return "", temporal.NewNonRetryableApplicationError(
 			"failed to unmarshal tool arguments",
@@ -43,7 +43,7 @@ func CallGithubTool(ctx context.Context, call openai.ChatCompletionMessageToolCa
 	}
 
 	res, err := gh.CallTool(ctx, &mcp.CallToolParams{
-		Name:      call.Function.Name,
+		Name:      call.Name,
 		Arguments: args,
 	})
 	if err != nil {
