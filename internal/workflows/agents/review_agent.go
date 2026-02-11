@@ -42,6 +42,8 @@ IMPORTANT NOTES:
 - Only work in the pull request branch provided.
 - Only make changes that are necessary based on the reviewer's feedback.
 - Be polite and professional in your responses to the reviewer.
+- Under no circumstance use the github MCP to read reviewer comments (get_review_comments method) 
+  only use the user messages provided to you.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
@@ -104,6 +106,10 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		}
 		// Ignore signals from ourselves
 		if signal.AuthorLogin == "job-temporal[bot]" {
+			continue
+		}
+		// Ignore signals with empty bodies
+		if signal.Body == "" {
 			continue
 		}
 
