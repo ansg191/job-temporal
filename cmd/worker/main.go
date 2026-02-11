@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/database"
@@ -16,6 +18,10 @@ func main() {
 	if err := database.EnsureMigrations(); err != nil {
 		log.Fatalln("Unable to ensure database migrations", err)
 	}
+	if err := activities.CheckR2ReadWrite(context.Background()); err != nil {
+		log.Fatalln("Unable to verify R2 bucket read/write access", err)
+	}
+	slog.Info("R2 bucket read/write check succeeded")
 
 	c, err := client.Dial(client.Options{})
 	if err != nil {
@@ -30,6 +36,7 @@ func main() {
 	w.RegisterWorkflow(agents.BranchNameAgent)
 	w.RegisterWorkflow(agents.BuilderAgent)
 	w.RegisterWorkflow(agents.PullRequestAgent)
+	w.RegisterWorkflow(agents.BuildAndUploadPDFWorkflow)
 	w.RegisterWorkflow(agents.ReviewAgent)
 	w.RegisterActivity(activities.Greet)
 	w.RegisterActivity(activities.CallAI)
@@ -37,9 +44,15 @@ func main() {
 	w.RegisterActivity(activities.EditFile)
 	w.RegisterActivity(activities.EditLine)
 	w.RegisterActivity(activities.Build)
+	w.RegisterActivity(activities.BuildFinalPDF)
+	w.RegisterActivity(activities.UploadPDF)
+	w.RegisterActivity(activities.DeletePDFByURL)
 	w.RegisterActivity(activities.ListBranches)
 	w.RegisterActivity(activities.CreateBranch)
+	w.RegisterActivity(activities.GetBranchHeadSHA)
 	w.RegisterActivity(activities.CreatePullRequest)
+	w.RegisterActivity(activities.GetPullRequestBody)
+	w.RegisterActivity(activities.UpdatePullRequestBody)
 	w.RegisterActivity(activities.ListGithubTools)
 	w.RegisterActivity(activities.CallGithubTool)
 	w.RegisterActivity(activities.RegisterReviewReadyPR)

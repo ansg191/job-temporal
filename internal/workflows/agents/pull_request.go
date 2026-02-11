@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -22,6 +23,8 @@ type prOutput struct {
 
 var prOutputFormat = activities.GenerateTextFormat[prOutput]("pr_output")
 
+const prArtifactLinePrefix = "PDF Artifact:"
+
 const PullRequestInstructions = `
 You are a pull request agent who creates pull requests for the repository.
 These pull requests are created from branches that were created by previous agents.
@@ -39,6 +42,8 @@ IMPORTANT NOTES:
 - Only work in the branch provided
 - DO NOT under ANY circumstance create the pull request yourself using the Github tools.
 The pull request will be made using the title and description returned by you.
+- Always include the provided public PDF URL in the pull request description.
+- Include it on its own line in this exact format: "PDF Artifact: <url>".
 
 AVAILABLE TOOLS:
 - Github MCP tools to help you understand the changes made in the branch.
@@ -55,17 +60,40 @@ This will be used to create the pull request.
 
 type PullRequestAgentRequest struct {
 	github.ClientOptions
-	Branch string `json:"branch"`
-	Target string `json:"target"`
-	Job    string `json:"job"`
+	Branch      string      `json:"branch"`
+	Target      string      `json:"target"`
+	Job         string      `json:"job"`
+	Builder     string      `json:"builder"`
+	BuildTarget BuildTarget `json:"build_target"`
 }
 
 func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, error) {
+	builderType := req.Builder
+	if builderType == "" {
+		builderType = "typst"
+	}
+
+	var pdfURL string
+	err := workflow.ExecuteChildWorkflow(
+		ctx,
+		BuildAndUploadPDFWorkflow,
+		BuildAndUploadPDFWorkflowRequest{
+			ClientOptions: req.ClientOptions,
+			Branch:        req.Branch,
+			Builder:       builderType,
+			BuildTarget:   req.BuildTarget,
+		},
+	).Get(ctx, &pdfURL)
+	if err != nil {
+		return 0, err
+	}
+
 	messages := responses.ResponseInputParam{
 		systemMessage(PullRequestInstructions),
 		userMessage("Remote: " + req.Owner + "/" + req.Repo),
 		userMessage("Branch Name: " + req.Branch),
 		userMessage("Job description: " + req.Job),
+		userMessage("Public PDF URL (must be included in PR description): " + pdfURL),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -74,7 +102,7 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	var aiTools []responses.ToolUnionParam
-	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
+	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
 	}
@@ -110,6 +138,10 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 			messages = append(messages, userMessage("Invalid output format: "+err.Error()))
 			continue
 		}
+		if err = validatePRArtifactURL(pr.Body, pdfURL); err != nil {
+			messages = append(messages, userMessage("Invalid PR body: "+err.Error()))
+			continue
+		}
 
 		var prNum int
 		err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
@@ -124,6 +156,20 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 		}
 		return prNum, nil
 	}
+}
+
+func validatePRArtifactURL(body string, url string) error {
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prArtifactLinePrefix) {
+			if trimmed != prArtifactLinePrefix+" "+url {
+				return fmt.Errorf("artifact line must be exactly %q", prArtifactLinePrefix+" "+url)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("missing artifact line %q", prArtifactLinePrefix+" "+url)
 }
 
 type githubDispatcher struct {

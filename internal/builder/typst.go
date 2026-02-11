@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -55,17 +54,13 @@ func newTypstBuilder(opts ...func(Builder)) (*typstBuilder, error) {
 	return ret, nil
 }
 
-func (t *typstBuilder) Build(ctx context.Context, path string) (*BuildResult, error) {
-	// Create temporary file to store PDF
-	outFile, err := os.CreateTemp(os.TempDir(), "typst-*.pdf")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %w", err)
+func (t *typstBuilder) Build(ctx context.Context, path string, outputPath string) (*BuildResult, error) {
+	if outputPath == "" {
+		return nil, fmt.Errorf("output path is required")
 	}
-	defer outFile.Close()
-	defer os.Remove(outFile.Name())
 
 	// Run command and capture output
-	cmd := exec.CommandContext(ctx, t.execPath, "compile", t.rootFile, outFile.Name(), "--root", path, "--diagnostic-format=short")
+	cmd := exec.CommandContext(ctx, t.execPath, "compile", t.rootFile, outputPath, "--root", path, "--diagnostic-format=short")
 	slog.InfoContext(ctx, "Running typst command", "cmd", cmd.String())
 	output, err := cmd.CombinedOutput()
 
@@ -82,7 +77,7 @@ func (t *typstBuilder) Build(ctx context.Context, path string) (*BuildResult, er
 
 	// Check page limit
 	if t.pageLimit > 0 {
-		pageCount, err := api.PageCountFile(outFile.Name())
+		pageCount, err := api.PageCountFile(outputPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to count PDF pages: %w", err)
 		}

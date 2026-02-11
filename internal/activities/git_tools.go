@@ -68,3 +68,58 @@ func CreatePullRequest(ctx context.Context, req CreatePullRequestRequest) (int, 
 
 	return client.CreatePullRequest(ctx, req.Title, req.Description, req.Head, req.Base)
 }
+
+type GetBranchHeadSHARequest struct {
+	github.ClientOptions
+	Branch string
+}
+
+func GetBranchHeadSHA(ctx context.Context, req GetBranchHeadSHARequest) (string, error) {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return "", temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	return client.GetBranchHeadSHA(ctx, req.Branch)
+}
+
+type GetPullRequestBodyRequest struct {
+	github.ClientOptions
+	PRNumber int
+}
+
+func GetPullRequestBody(ctx context.Context, req GetPullRequestBodyRequest) (string, error) {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return "", temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	return client.GetPullRequestBody(ctx, req.PRNumber)
+}
+
+type UpdatePullRequestBodyRequest struct {
+	github.ClientOptions
+	PRNumber int
+	Body     string
+}
+
+func UpdatePullRequestBody(ctx context.Context, req UpdatePullRequestBodyRequest) error {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	return client.UpdatePullRequestBody(ctx, req.PRNumber, req.Body)
+}

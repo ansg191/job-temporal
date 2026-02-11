@@ -2,10 +2,24 @@ package builder
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 )
+
+func makeTempPDFPath(t *testing.T) string {
+	t.Helper()
+
+	f, err := os.CreateTemp(t.TempDir(), "out-*.pdf")
+	if err != nil {
+		t.Fatalf("CreateTemp() unexpected error: %v", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatalf("Close() unexpected error: %v", err)
+	}
+	return f.Name()
+}
 
 func TestNewTypstBuilder_WithTypstPath(t *testing.T) {
 	t.Parallel()
@@ -149,8 +163,8 @@ func TestParseTypstErrors(t *testing.T) {
 			expected: []string{"file.typ:26:5: error: unclosed delimiter"},
 		},
 		{
-			name:     "multiple errors",
-			output:   "file.typ:26:5: error: unclosed delimiter\nfile.typ:33:0: error: unexpected equals sign",
+			name:   "multiple errors",
+			output: "file.typ:26:5: error: unclosed delimiter\nfile.typ:33:0: error: unexpected equals sign",
 			expected: []string{
 				"file.typ:26:5: error: unclosed delimiter",
 				"file.typ:33:0: error: unexpected equals sign",
@@ -211,7 +225,7 @@ func TestTypstBuilder_Build_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Errorf("Build() unexpected error: %v", err)
@@ -238,7 +252,7 @@ func TestTypstBuilder_Build_CompilationError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Errorf("Build() unexpected error: %v", err)
@@ -271,7 +285,7 @@ func TestTypstBuilder_Build_PageLimitExceeded(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Fatalf("Build() unexpected error: %v", err)
@@ -313,7 +327,7 @@ func TestTypstBuilder_Build_WithCustomPageLimit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Fatalf("Build() unexpected error: %v", err)
@@ -341,7 +355,7 @@ func TestTypstBuilder_Build_NoPageLimit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Fatalf("Build() unexpected error: %v", err)
@@ -367,7 +381,7 @@ func TestTypstBuilder_Build_MissingRootFile(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	if err != nil {
 		t.Fatalf("Build() unexpected error: %v", err)
@@ -409,7 +423,7 @@ func TestTypstBuilder_Build_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	result, err := builder.Build(ctx, ".")
+	result, err := builder.Build(ctx, ".", makeTempPDFPath(t))
 
 	// With a cancelled context, the command should fail
 	// Either err is non-nil or result.Success is false

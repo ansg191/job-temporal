@@ -3,6 +3,7 @@ package activities
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -10,6 +11,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"go.temporal.io/sdk/temporal"
 )
 
 // ResponseTextFormat is a Temporal-serializable representation of a JSON schema text format.
@@ -46,7 +48,7 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 	client := openai.NewClient(option.WithMaxRetries(0))
 	input, err := maybeCompactInput(ctx, client, request)
 	if err != nil {
-		return nil, err
+		return nil, classifyOpenAIError(err)
 	}
 
 	params := responses.ResponseNewParams{
@@ -78,7 +80,11 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 		}
 	}
 
-	return client.Responses.New(ctx, params)
+	resp, err := client.Responses.New(ctx, params)
+	if err != nil {
+		return nil, classifyOpenAIError(err)
+	}
+	return resp, nil
 }
 
 func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAIResponsesRequest) (responses.ResponseInputParam, error) {
@@ -113,7 +119,7 @@ func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAI
 
 	tokenCount, err := client.Responses.InputTokens.Count(ctx, tokenCountParams)
 	if err != nil {
-		return nil, err
+		return nil, classifyOpenAIError(err)
 	}
 
 	threshold := contextWindow / 2
@@ -138,10 +144,25 @@ func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAI
 
 	compacted, err := client.Responses.Compact(ctx, compactParams)
 	if err != nil {
-		return nil, err
+		return nil, classifyOpenAIError(err)
 	}
 
 	return compactedOutputToInput(compacted.Output), nil
+}
+
+func classifyOpenAIError(err error) error {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == 400 && apiErr.Type == "invalid_request_error" {
+		msg := "openai invalid request"
+		if apiErr.Param != "" {
+			msg += " (param: " + apiErr.Param + ")"
+		}
+		if apiErr.Message != "" {
+			msg += ": " + apiErr.Message
+		}
+		return temporal.NewNonRetryableApplicationError(msg, "OpenAIInvalidRequestError", err)
+	}
+	return err
 }
 
 func modelContextWindow(model string) (int64, bool) {

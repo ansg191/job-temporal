@@ -95,6 +95,8 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 				Branch:        req.BranchName,
 				Target:        req.TargetBranch,
 				Job:           req.Job,
+				Builder:       req.Builder,
+				BuildTarget:   req.BuildTarget,
 			},
 		).Get(ctx, &prNum)
 		if err != nil {
@@ -122,12 +124,9 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.Respon
 
 	switch call.Name {
 	case tools.BuildToolDesc.OfFunction.Name:
-		var file string
-		switch d.buildTarget {
-		case BuildTargetResume:
-			file = "resume.typ"
-		case BuildTargetCoverLetter:
-			file = "cover_letter.typ"
+		file, err := resolveBuildTargetFile(d.buildTarget)
+		if err != nil {
+			return nil, err
 		}
 
 		req := activities.BuildRequest{

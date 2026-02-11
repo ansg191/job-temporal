@@ -122,3 +122,32 @@ func (c *Client) CreatePullRequest(ctx context.Context, title, description, head
 	}
 	return pr.GetNumber(), nil
 }
+
+func (c *Client) GetBranchHeadSHA(ctx context.Context, branch string) (string, error) {
+	ref, _, err := c.Git.GetRef(ctx, c.owner, c.repo, "heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	return ref.GetObject().GetSHA(), nil
+}
+
+func (c *Client) GetPullRequestBody(ctx context.Context, prNumber int) (string, error) {
+	pr, _, err := c.PullRequests.Get(ctx, c.owner, c.repo, prNumber)
+	if err != nil {
+		return "", err
+	}
+	return pr.GetBody(), nil
+}
+
+func (c *Client) UpdatePullRequestBody(ctx context.Context, prNumber int, body string) error {
+	_, _, err := c.PullRequests.Edit(
+		ctx,
+		c.owner,
+		c.repo,
+		prNumber,
+		&github.PullRequest{
+			Body: &body,
+		},
+	)
+	return err
+}

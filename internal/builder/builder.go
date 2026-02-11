@@ -6,7 +6,7 @@ import (
 )
 
 type Builder interface {
-	Build(ctx context.Context, path string) (*BuildResult, error)
+	Build(ctx context.Context, path, outputPath string) (*BuildResult, error)
 }
 
 type BuildResult struct {

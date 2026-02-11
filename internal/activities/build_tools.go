@@ -2,6 +2,7 @@ package activities
 
 import (
 	"context"
+	"os"
 	"path"
 	"strings"
 
@@ -18,38 +19,16 @@ type BuildRequest struct {
 }
 
 func Build(ctx context.Context, req BuildRequest) (string, error) {
-	client, err := github.NewClient(req.ClientOptions)
+	tmpFile, err := os.CreateTemp(os.TempDir(), "build-*.pdf")
 	if err != nil {
 		return "", err
 	}
-
-	// Construct a remote URL with GitHub App authentication
-	repoRemote, err := client.GetAuthenticatedRemoteURL(ctx)
-	if err != nil {
+	if err = tmpFile.Close(); err != nil {
 		return "", err
 	}
+	defer os.Remove(tmpFile.Name())
 
-	// Clone the repository
-	repo, err := git.NewGitRepo(ctx, repoRemote)
-	if err != nil {
-		return "", err
-	}
-	defer repo.Close()
-
-	// Checkout the branch
-	if err = repo.SetBranch(ctx, req.Branch); err != nil {
-		return "", err
-	}
-
-	// Setup the builder
-	file := path.Join(repo.Path(), req.File)
-	b, err := builder.NewBuilder(req.Builder, builder.WithTypstRootFile(file))
-	if err != nil {
-		return "", err
-	}
-
-	// Perform the build
-	result, err := b.Build(ctx, repo.Path())
+	result, err := runBuild(ctx, req.ClientOptions, req.Branch, req.Builder, req.File, tmpFile.Name())
 	if err != nil {
 		return "", err
 	}
@@ -59,4 +38,41 @@ func Build(ctx context.Context, req BuildRequest) (string, error) {
 	}
 
 	return "Builder returned errors:\n" + strings.Join(result.Errors, "\n"), nil
+}
+
+func runBuild(
+	ctx context.Context,
+	clientOpts github.ClientOptions,
+	branch string,
+	builderName string,
+	file string,
+	outputPath string,
+) (*builder.BuildResult, error) {
+	client, err := github.NewClient(clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	repoRemote, err := client.GetAuthenticatedRemoteURL(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	repo, err := git.NewGitRepo(ctx, repoRemote)
+	if err != nil {
+		return nil, err
+	}
+	defer repo.Close()
+
+	if err = repo.SetBranch(ctx, branch); err != nil {
+		return nil, err
+	}
+
+	rootFile := path.Join(repo.Path(), file)
+	b, err := builder.NewBuilder(builderName, builder.WithTypstRootFile(rootFile))
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Build(ctx, repo.Path(), outputPath)
 }
