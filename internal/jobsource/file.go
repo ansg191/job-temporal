@@ -11,6 +11,7 @@ import (
 
 type FileStrategy struct{}
 
+// NewFileStrategy constructs a strategy for file:// URLs.
 func NewFileStrategy() *FileStrategy {
 	return &FileStrategy{}
 }

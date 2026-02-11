@@ -31,6 +31,8 @@ type LinkedInStrategy struct {
 	endpointFormat string
 }
 
+// NewLinkedInStrategy constructs a strategy that resolves LinkedIn job URLs
+// via the public jobs-guest endpoint.
 func NewLinkedInStrategy(client *http.Client) *LinkedInStrategy {
 	if client == nil {
 		client = http.DefaultClient

@@ -10,19 +10,27 @@ import (
 )
 
 type Strategy interface {
+	// Name returns a short source identifier (for example "linkedin" or "file").
+	// It is used in resolver errors and logs to make failures attributable.
 	Name() string
+	// Match reports whether this strategy can resolve a given URL.
 	Match(u *url.URL) bool
+	// Fetch resolves a job description from the provided URL.
 	Fetch(ctx context.Context, u *url.URL) (string, error)
 }
 
+// Resolver picks a matching job-source strategy for URL inputs and
+// preserves raw text inputs unchanged.
 type Resolver struct {
 	strategies []Strategy
 }
 
+// NewResolver builds a Resolver with the provided strategies in order.
 func NewResolver(strategies ...Strategy) *Resolver {
 	return &Resolver{strategies: strategies}
 }
 
+// NewDefaultResolver returns the built-in strategy set.
 func NewDefaultResolver() *Resolver {
 	httpClient := &http.Client{
 		Timeout: 20 * time.Second,
@@ -33,6 +41,8 @@ func NewDefaultResolver() *Resolver {
 	)
 }
 
+// Resolve converts user input to a job description.
+// Non-URL input is returned as-is (trimmed) to preserve existing CLI behavior.
 func (r *Resolver) Resolve(ctx context.Context, input string) (string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
