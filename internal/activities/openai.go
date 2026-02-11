@@ -3,6 +3,7 @@ package activities
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/openai/openai-go/v3"
@@ -20,12 +21,12 @@ type ResponseTextFormat struct {
 }
 
 type OpenAIResponsesRequest struct {
-	Model        string                              `json:"model"`
-	Input        responses.ResponseInputParam        `json:"input"`
-	Tools        []responses.ToolUnionParam          `json:"tools"`
-	Temperature  param.Opt[float64]                  `json:"temperature"`
-	Text         *ResponseTextFormat                 `json:"text,omitempty"`
-	Instructions string                              `json:"instructions,omitempty"`
+	Model        string                       `json:"model"`
+	Input        responses.ResponseInputParam `json:"input"`
+	Tools        []responses.ToolUnionParam   `json:"tools"`
+	Temperature  param.Opt[float64]           `json:"temperature"`
+	Text         *ResponseTextFormat          `json:"text,omitempty"`
+	Instructions string                       `json:"instructions,omitempty"`
 }
 
 func GenerateTextFormat[T any](name string) *ResponseTextFormat {
@@ -43,9 +44,13 @@ func GenerateTextFormat[T any](name string) *ResponseTextFormat {
 
 func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Response, error) {
 	client := openai.NewClient(option.WithMaxRetries(0))
+	input, err := maybeCompactInput(ctx, client, request)
+	if err != nil {
+		return nil, err
+	}
 
 	params := responses.ResponseNewParams{
-		Input:       responses.ResponseNewParamsInputUnion{OfInputItemList: request.Input},
+		Input:       responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 		Model:       request.Model,
 		Tools:       request.Tools,
 		Temperature: request.Temperature,
@@ -74,6 +79,91 @@ func CallAI(ctx context.Context, request OpenAIResponsesRequest) (*responses.Res
 	}
 
 	return client.Responses.New(ctx, params)
+}
+
+func maybeCompactInput(ctx context.Context, client openai.Client, request OpenAIResponsesRequest) (responses.ResponseInputParam, error) {
+	contextWindow, ok := modelContextWindow(request.Model)
+	if !ok {
+		return request.Input, nil
+	}
+
+	tokenCountParams := responses.InputTokenCountParams{
+		Model: openai.String(request.Model),
+		Input: responses.InputTokenCountParamsInputUnion{OfResponseInputItemArray: request.Input},
+		Tools: request.Tools,
+	}
+	if request.Instructions != "" {
+		tokenCountParams.Instructions = openai.String(request.Instructions)
+	}
+	if request.Text != nil {
+		schemaMap, err := toSchemaMap(request.Text.Schema)
+		if err != nil {
+			return nil, err
+		}
+		tokenCountParams.Text = responses.InputTokenCountParamsText{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
+					Name:   request.Text.Name,
+					Schema: schemaMap,
+					Strict: openai.Bool(request.Text.Strict),
+				},
+			},
+		}
+	}
+
+	tokenCount, err := client.Responses.InputTokens.Count(ctx, tokenCountParams)
+	if err != nil {
+		return nil, err
+	}
+
+	threshold := contextWindow / 2
+	if tokenCount.InputTokens <= threshold {
+		return request.Input, nil
+	}
+
+	slog.Info(
+		"openai context compaction triggered",
+		"model", request.Model,
+		"input_tokens", tokenCount.InputTokens,
+		"threshold", threshold,
+	)
+
+	compactParams := responses.ResponseCompactParams{
+		Model: responses.ResponseCompactParamsModel(request.Model),
+		Input: responses.ResponseCompactParamsInputUnion{OfResponseInputItemArray: request.Input},
+	}
+	if request.Instructions != "" {
+		compactParams.Instructions = openai.String(request.Instructions)
+	}
+
+	compacted, err := client.Responses.Compact(ctx, compactParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return compactedOutputToInput(compacted.Output), nil
+}
+
+func modelContextWindow(model string) (int64, bool) {
+	switch model {
+	case openai.ChatModelGPT5_2,
+		openai.ChatModelGPT5_2_2025_12_11,
+		openai.ChatModelGPT5_2Pro,
+		openai.ChatModelGPT5_2Pro2025_12_11:
+		return 400_000, true
+	case openai.ChatModelGPT5_2ChatLatest:
+		return 128_000, true
+	default:
+		return 0, false
+	}
+}
+
+func compactedOutputToInput(output []responses.ResponseOutputItemUnion) responses.ResponseInputParam {
+	input := make(responses.ResponseInputParam, 0, len(output))
+	for _, item := range output {
+		input = append(input, param.Override[responses.ResponseInputItemUnionParam](json.RawMessage(item.RawJSON())))
+	}
+	return input
 }
 
 // toSchemaMap converts an arbitrary schema value to map[string]any via a JSON
