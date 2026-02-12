@@ -19,7 +19,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	c, err := client.Dial(client.Options{})
+	temporalAddress := os.Getenv("TEMPORAL_ADDRESS")
+	if temporalAddress == "" {
+		temporalAddress = client.DefaultHostPort
+	}
+
+	c, err := client.Dial(client.Options{
+		HostPort: temporalAddress,
+	})
 	if err != nil {
 		log.Fatalln("Unable to create client", err)
 	}

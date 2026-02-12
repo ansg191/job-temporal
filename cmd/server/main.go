@@ -17,7 +17,14 @@ func main() {
 		log.Fatalln("Unable to ensure database migrations:", err)
 	}
 
-	tc, err := client.Dial(client.Options{})
+	temporalAddress := os.Getenv("TEMPORAL_ADDRESS")
+	if temporalAddress == "" {
+		temporalAddress = client.DefaultHostPort
+	}
+
+	tc, err := client.Dial(client.Options{
+		HostPort: temporalAddress,
+	})
 	if err != nil {
 		log.Fatalf("failed to create temporal client: %v", err)
 	}

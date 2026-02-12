@@ -2,6 +2,7 @@ job*.txt
 config.yaml
 *.pem
 .idea/
+.env
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,macos,windows,linux,intellij+all,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,macos,windows,linux,intellij+all,visualstudiocode
@@ -139,7 +140,8 @@ fabric.properties
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*

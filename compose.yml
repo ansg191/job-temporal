@@ -17,5 +17,100 @@ services:
       timeout: 5s
       retries: 5
 
+  temporal-postgres:
+    image: postgres:15
+    container_name: job-temporal-temporal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: job-temporal-temporal
+    restart: unless-stopped
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-postgres
+    ports:
+      - "7233:7233"
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: job-temporal-temporal-ui
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    ports:
+      - "8233:8080"
+
+  server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    container_name: job-temporal-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://job-temporal:job-temporal@postgres:5432/job-temporal?sslmode=disable
+      TEMPORAL_ADDRESS: temporal:7233
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-dev-secret}
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    container_name: job-temporal-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://job-temporal:job-temporal@postgres:5432/job-temporal?sslmode=disable
+      TEMPORAL_ADDRESS: temporal:7233
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_INSTALL_ID: ${GITHUB_INSTALL_ID:-}
+      GITHUB_APP_PRIVATE_KEY: /run/secrets/github_app_private_key.pem
+      GITHUB_MCP_MIN_INTERVAL_MS: ${GITHUB_MCP_MIN_INTERVAL_MS:-1500}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-auto}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+    volumes:
+      - type: bind
+        source: ${GITHUB_APP_PRIVATE_KEY}
+        target: /run/secrets/github_app_private_key.pem
+        read_only: true
+
 volumes:
   postgres_data:
+  temporal_postgres_data:

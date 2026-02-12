@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"os"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/database"
@@ -23,7 +24,14 @@ func main() {
 	}
 	slog.Info("R2 bucket read/write check succeeded")
 
-	c, err := client.Dial(client.Options{})
+	temporalAddress := os.Getenv("TEMPORAL_ADDRESS")
+	if temporalAddress == "" {
+		temporalAddress = client.DefaultHostPort
+	}
+
+	c, err := client.Dial(client.Options{
+		HostPort: temporalAddress,
+	})
 	if err != nil {
 		log.Fatalln("Unable to create client", err)
 	}
