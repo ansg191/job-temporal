@@ -99,6 +99,7 @@ services:
       GITHUB_INSTALL_ID: ${GITHUB_INSTALL_ID:-}
       GITHUB_APP_PRIVATE_KEY: /run/secrets/github_app_private_key.pem
       GITHUB_MCP_MIN_INTERVAL_MS: ${GITHUB_MCP_MIN_INTERVAL_MS:-1500}
+      TYPST_FONT_PATHS: /System/Library/Fonts:/System/Library/Fonts/Supplemental:/usr/share/fonts:/usr/local/share/fonts
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-auto}
@@ -109,6 +110,14 @@ services:
       - type: bind
         source: ${GITHUB_APP_PRIVATE_KEY}
         target: /run/secrets/github_app_private_key.pem
+        read_only: true
+      - type: bind
+        source: /System/Library/Fonts
+        target: /System/Library/Fonts
+        read_only: true
+      - type: bind
+        source: /System/Library/Fonts/Supplemental
+        target: /System/Library/Fonts/Supplemental
         read_only: true
 
 volumes:
