@@ -75,7 +75,9 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 
 	var pdfURL string
 	err := workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: MakeChildWorkflowID(ctx, "build-upload-pdf", req.Branch, builderType),
+		}),
 		BuildAndUploadPDFWorkflow,
 		BuildAndUploadPDFWorkflowRequest{
 			ClientOptions: req.ClientOptions,

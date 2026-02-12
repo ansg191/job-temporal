@@ -16,7 +16,9 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 	// Create new final branch to merge changes into
 	var branchName string
 	err := workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "branch-name-agent", "final"),
+		}),
 		agents.BranchNameAgent,
 		agents.BranchNameAgentRequest{
 			ClientOptions:  req.ClientOptions,
@@ -30,7 +32,9 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 
 	// Start cover letter & resume builder workflows in parallel
 	resumeFut := workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "builder-workflow", "resume", branchName),
+		}),
 		BuilderWorkflow,
 		BuilderWorkflowRequest{
 			ClientOptions: req.ClientOptions,
@@ -41,7 +45,9 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 		},
 	)
 	coverLetterFut := workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "builder-workflow", "cover-letter", branchName),
+		}),
 		BuilderWorkflow,
 		BuilderWorkflowRequest{
 			ClientOptions: req.ClientOptions,

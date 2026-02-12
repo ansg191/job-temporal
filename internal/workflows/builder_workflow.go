@@ -26,7 +26,9 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
 	// Create new branch for us to work with
 	var branchName string
 	err = workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "branch-name-agent", req.Purpose),
+		}),
 		agents.BranchNameAgent,
 		agents.BranchNameAgentRequest{
 			ClientOptions:  req.ClientOptions,
@@ -40,7 +42,9 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
 
 	var pr int
 	err = workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "builder-agent", branchName, req.Purpose),
+		}),
 		agents.BuilderAgent,
 		agents.BuilderAgentRequest{
 			ClientOptions: req.ClientOptions,
@@ -56,7 +60,9 @@ func BuilderWorkflow(ctx workflow.Context, req BuilderWorkflowRequest) error {
 	}
 
 	err = workflow.ExecuteChildWorkflow(
-		ctx,
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: agents.MakeChildWorkflowID(ctx, "review-agent", branchName, req.Purpose),
+		}),
 		agents.ReviewAgent,
 		agents.ReviewAgentArgs{
 			Repo:        req.ClientOptions,

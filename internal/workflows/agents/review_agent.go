@@ -91,6 +91,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
 	initialized := false
+	buildRun := 0
 
 	for {
 		// Wait for signal
@@ -152,8 +153,17 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 
 			if !hasFunctionCalls(result.Output) {
 				// Finished with agent loop, rebuild the PDF
+				buildRun++
 				err = workflow.ExecuteChildWorkflow(
-					ctx,
+					workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+						WorkflowID: MakeChildWorkflowID(
+							ctx,
+							"build-upload-pdf",
+							args.BranchName,
+							strconv.Itoa(args.Pr),
+							strconv.Itoa(buildRun),
+						),
+					}),
 					BuildAndUploadPDFWorkflow,
 					BuildAndUploadPDFWorkflowRequest{
 						ClientOptions: args.Repo,

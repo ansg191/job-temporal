@@ -91,7 +91,9 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		// Activate PR Builder workflow
 		var prNum int
 		err = workflow.ExecuteChildWorkflow(
-			ctx,
+			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+				WorkflowID: MakeChildWorkflowID(ctx, "pull-request-agent", req.BranchName, req.TargetBranch),
+			}),
 			PullRequestAgent,
 			PullRequestAgentRequest{
 				ClientOptions: req.ClientOptions,
