@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/openai/openai-go/v3/responses"
@@ -14,23 +15,26 @@ import (
 	"github.com/ansg191/job-temporal/internal/github"
 )
 
+const (
+	githubToolMaxAttempts      = 6
+	githubToolRetryBaseBackoff = 500 * time.Millisecond
+	githubToolRetryMaxBackoff  = 8 * time.Second
+)
+
 func ListGithubTools(ctx context.Context) ([]responses.ToolUnionParam, error) {
-	gh, err := github.NewTools(ctx, github.DefaultGithubURL)
+	var aiTools []responses.ToolUnionParam
+	err := retryGithubRateLimit(ctx, func() error {
+		var err error
+		aiTools, err = github.SharedOpenAITools(ctx)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer gh.Close()
-
-	return gh.OpenAITools(ctx)
+	return aiTools, nil
 }
 
 func CallGithubTool(ctx context.Context, call responses.ResponseOutputItemUnion) (string, error) {
-	gh, err := github.NewTools(ctx, github.DefaultGithubURL)
-	if err != nil {
-		return "", err
-	}
-	defer gh.Close()
-
 	log.Println(call.Name, call.Arguments)
 
 	args, err := parseArgs(call.Arguments)
@@ -42,9 +46,14 @@ func CallGithubTool(ctx context.Context, call responses.ResponseOutputItemUnion)
 		)
 	}
 
-	res, err := gh.CallTool(ctx, &mcp.CallToolParams{
-		Name:      call.Name,
-		Arguments: args,
+	var res *mcp.CallToolResult
+	err = retryGithubRateLimit(ctx, func() error {
+		var err error
+		res, err = github.SharedCallTool(ctx, &mcp.CallToolParams{
+			Name:      call.Name,
+			Arguments: args,
+		})
+		return err
 	})
 	if err != nil {
 		return "", err
@@ -82,4 +91,40 @@ func parseArgs(argStr string) (map[string]any, error) {
 	}
 
 	return obj, nil
+}
+
+func retryGithubRateLimit(ctx context.Context, fn func() error) error {
+	backoff := githubToolRetryBaseBackoff
+	var err error
+
+	for attempt := 1; attempt <= githubToolMaxAttempts; attempt++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		if !isGithubRateLimitError(err) || attempt == githubToolMaxAttempts {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > githubToolRetryMaxBackoff {
+			backoff = githubToolRetryMaxBackoff
+		}
+	}
+
+	return err
+}
+
+func isGithubRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too many requests") || strings.Contains(msg, "429")
 }
