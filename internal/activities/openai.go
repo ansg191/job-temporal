@@ -121,22 +121,25 @@ func waitForBackgroundResponse(ctx context.Context, client openai.Client, resp *
 	var err error
 
 	for {
-		activity.RecordHeartbeat(ctx, map[string]any{
-			"response_id": responseID,
-			"status":      string(resp.Status),
-		})
+		// Apparently, responses.Get can sometimes return nil, nil
+		if resp != nil {
+			activity.RecordHeartbeat(ctx, map[string]any{
+				"response_id": responseID,
+				"status":      string(resp.Status),
+			})
 
-		switch resp.Status {
-		case responses.ResponseStatusCompleted:
-			return resp, nil
-		case responses.ResponseStatusFailed, responses.ResponseStatusCancelled, responses.ResponseStatusIncomplete:
-			return nil, temporal.NewApplicationError(
-				fmt.Sprintf("openai background response ended with status %q", resp.Status),
-				"OpenAIBackgroundResponseError",
-				resp.Status,
-				resp.IncompleteDetails,
-				resp.Error,
-			)
+			switch resp.Status {
+			case responses.ResponseStatusCompleted:
+				return resp, nil
+			case responses.ResponseStatusFailed, responses.ResponseStatusCancelled, responses.ResponseStatusIncomplete:
+				return nil, temporal.NewApplicationError(
+					fmt.Sprintf("openai background response ended with status %q", resp.Status),
+					"OpenAIBackgroundResponseError",
+					resp.Status,
+					resp.IncompleteDetails,
+					resp.Error,
+				)
+			}
 		}
 
 		select {

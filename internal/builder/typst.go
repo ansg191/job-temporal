@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -13,6 +14,9 @@ import (
 type typstBuilder struct {
 	execPath  string
 	rootFile  string
+	format    string
+	pages     string
+	ppi       int
 	pageLimit int // 0 = no limit, default = 1
 }
 
@@ -28,6 +32,24 @@ func WithTypstRootFile(path string) func(Builder) {
 	}
 }
 
+func WithTypstFormat(format string) func(Builder) {
+	return func(b Builder) {
+		b.(*typstBuilder).format = format
+	}
+}
+
+func WithTypstPages(pages string) func(Builder) {
+	return func(b Builder) {
+		b.(*typstBuilder).pages = pages
+	}
+}
+
+func WithTypstPPI(ppi int) func(Builder) {
+	return func(b Builder) {
+		b.(*typstBuilder).ppi = ppi
+	}
+}
+
 func WithPageLimit(limit int) func(Builder) {
 	return func(b Builder) {
 		switch b.(type) {
@@ -38,7 +60,10 @@ func WithPageLimit(limit int) func(Builder) {
 }
 
 func newTypstBuilder(opts ...func(Builder)) (*typstBuilder, error) {
-	ret := &typstBuilder{pageLimit: 1} // default to 1 page for resumes
+	ret := &typstBuilder{
+		format:    "pdf",
+		pageLimit: 1, // default to 1 page for resumes
+	}
 	for _, opt := range opts {
 		opt(ret)
 	}
@@ -60,7 +85,24 @@ func (t *typstBuilder) Build(ctx context.Context, path string, outputPath string
 	}
 
 	// Run command and capture output
-	cmd := exec.CommandContext(ctx, t.execPath, "compile", t.rootFile, outputPath, "--root", path, "--diagnostic-format=short")
+	args := []string{
+		"compile",
+		t.rootFile,
+		outputPath,
+		"--root",
+		path,
+		"--diagnostic-format=short",
+	}
+	if t.format != "" {
+		args = append(args, "--format", t.format)
+	}
+	if t.pages != "" {
+		args = append(args, "--pages", t.pages)
+	}
+	if t.format == "png" && t.ppi > 0 {
+		args = append(args, "--ppi", strconv.Itoa(t.ppi))
+	}
+	cmd := exec.CommandContext(ctx, t.execPath, args...)
 	slog.InfoContext(ctx, "Running typst command", "cmd", cmd.String())
 	output, err := cmd.CombinedOutput()
 
@@ -76,7 +118,7 @@ func (t *typstBuilder) Build(ctx context.Context, path string, outputPath string
 	}
 
 	// Check page limit
-	if t.pageLimit > 0 {
+	if t.format == "pdf" && t.pageLimit > 0 {
 		pageCount, err := api.PageCountFile(outputPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to count PDF pages: %w", err)

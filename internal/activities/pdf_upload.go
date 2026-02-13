@@ -129,6 +129,10 @@ func loadR2Config() (*r2Config, error) {
 }
 
 func uploadBytesToR2(ctx context.Context, cfg *r2Config, key string, content []byte) error {
+	return uploadBytesToR2WithContentType(ctx, cfg, key, content, "application/pdf")
+}
+
+func uploadBytesToR2WithContentType(ctx context.Context, cfg *r2Config, key string, content []byte, contentType string) error {
 	s3Client, err := newR2S3Client(ctx, cfg.Endpoint)
 	if err != nil {
 		return err
@@ -138,7 +142,7 @@ func uploadBytesToR2(ctx context.Context, cfg *r2Config, key string, content []b
 		Bucket:      aws.String(cfg.Bucket),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(content),
-		ContentType: aws.String("application/pdf"),
+		ContentType: aws.String(contentType),
 	})
 	return err
 }

@@ -44,10 +44,13 @@ IMPORTANT NOTES:
 - Be polite and professional in your responses to the reviewer.
 - Under no circumstance use the github MCP to read reviewer comments (get_review_comments method) 
   only use the user messages provided to you.
+- Keep iterating on layout quality as long as practical.
+- Always fix all high severity layout issues before stopping.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
 - build(): Compile the resume and perform various checks
+- review_pdf_layout(): Render built pages and return structured visual layout defects with fix hints (resume only).
 `
 
 type ReviewAgentArgs struct {
@@ -92,6 +95,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	callAICtx := withCallAIActivityOptions(ctx)
 	initialized := false
 	buildRun := 0
+	enableLayoutReview := args.BuildTarget == BuildTargetResume
 
 	for {
 		// Wait for signal
@@ -135,6 +139,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		}
 
 		var pdfUrl string
+		layoutReviewRun := 0
 		for {
 			var result *responses.Response
 			err = workflow.ExecuteActivity(
@@ -143,7 +148,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 				activities.OpenAIResponsesRequest{
 					Model:          openai.ChatModelGPT5_2,
 					Input:          pendingInput,
-					Tools:          append(aiTools, tools.BuildToolDesc),
+					Tools:          availableReviewTools(aiTools, enableLayoutReview),
 					ConversationID: conversationID,
 				},
 			).Get(ctx, &result)
@@ -152,6 +157,51 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 			}
 
 			if !hasFunctionCalls(result.Output) {
+				if enableLayoutReview {
+					file, err := resolveBuildTargetFile(args.BuildTarget)
+					if err != nil {
+						return err
+					}
+					layoutReviewRun++
+					layoutReviewReq := activities.ReviewPDFLayoutRequest{
+						ClientOptions: args.Repo,
+						Branch:        args.BranchName,
+						Builder:       "typst",
+						File:          file,
+					}
+					layoutReviewResult, layoutReviewJSON, err := runLayoutReviewGate(
+						ctx,
+						MakeChildWorkflowID(
+							ctx,
+							"layout-review-gate",
+							args.BranchName,
+							strconv.Itoa(args.Pr),
+							strconv.Itoa(layoutReviewRun),
+						),
+						layoutReviewReq,
+					)
+					if err != nil {
+						var appErr *temporal.ApplicationError
+						if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
+							// Build failed, so kick back to Ai to fix
+							var details []string
+							_ = appErr.Details(&details)
+							pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
+								"Build failed, fix and try again: \n%s",
+								strings.Join(details, "\n"),
+							))}
+							continue
+						}
+						return err
+					}
+					if block, reason := shouldBlockLayoutIssues(layoutReviewResult, layoutReviewRun); block {
+						pendingInput = responses.ResponseInputParam{userMessage(
+							"Layout review gate blocked completion (" + reason + "). Keep editing and rebuilding.\nCurrent findings JSON:\n" + layoutReviewJSON,
+						)}
+						continue
+					}
+				}
+
 				// Finished with agent loop, rebuild the PDF
 				buildRun++
 				err = workflow.ExecuteChildWorkflow(
@@ -219,12 +269,9 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 
 	switch call.Name {
 	case tools.BuildToolDesc.OfFunction.Name:
-		var file string
-		switch d.buildTarget {
-		case BuildTargetResume:
-			file = "resume.typ"
-		case BuildTargetCoverLetter:
-			file = "cover_letter.typ"
+		file, err := resolveBuildTargetFile(d.buildTarget)
+		if err != nil {
+			return nil, err
 		}
 
 		req := activities.BuildRequest{
@@ -234,9 +281,48 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
+	case tools.ReviewPDFLayoutToolDesc.OfFunction.Name:
+		if d.buildTarget != BuildTargetResume {
+			return nil, fmt.Errorf("review_pdf_layout is only available for resume builds")
+		}
+		args := tools.ReviewPDFLayoutArgs{}
+		if err := tools.ReviewPDFLayoutToolParseArgs(call.Arguments, &args); err != nil {
+			return nil, err
+		}
+
+		file, err := resolveBuildTargetFile(d.buildTarget)
+		if err != nil {
+			return nil, err
+		}
+
+		req := activities.ReviewPDFLayoutRequest{
+			ClientOptions: d.ghOpts,
+			Branch:        d.branchName,
+			Builder:       "typst", // TODO: remove this hardcoded builder
+			File:          file,
+			PageStart:     args.PageStart,
+			PageEnd:       args.PageEnd,
+			Focus:         args.Focus,
+		}
+		return workflow.ExecuteChildWorkflow(
+			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+				WorkflowID: MakeChildWorkflowID(ctx, "review-pdf-layout", d.branchName, call.CallID),
+			}),
+			ReviewPDFLayoutWorkflow,
+			req,
+		), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
+}
+
+func availableReviewTools(aiTools []responses.ToolUnionParam, enableLayoutReview bool) []responses.ToolUnionParam {
+	ret := append([]responses.ToolUnionParam{}, aiTools...)
+	ret = append(ret, tools.BuildToolDesc)
+	if enableLayoutReview {
+		ret = append(ret, tools.ReviewPDFLayoutToolDesc)
+	}
+	return ret
 }
 
 func updatePRDescription(ctx workflow.Context, repo github.ClientOptions, pr int, url string) error {

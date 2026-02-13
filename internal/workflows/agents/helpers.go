@@ -9,22 +9,25 @@ import (
 	"github.com/ansg191/job-temporal/internal/activities"
 )
 
-// userMessage builds a user-role input message for the OpenAI responses API.
-func userMessage(text string) responses.ResponseInputItemUnionParam {
-	msg := responses.ResponseInputItemParamOfMessage(text, responses.EasyInputMessageRoleUser)
+func messageWithRole[T string | responses.ResponseInputMessageContentListParam](
+	content T,
+	role responses.EasyInputMessageRole,
+) responses.ResponseInputItemUnionParam {
+	msg := responses.ResponseInputItemParamOfMessage(content, role)
 	if msg.OfMessage != nil {
 		msg.OfMessage.Type = responses.EasyInputMessageTypeMessage
 	}
 	return msg
 }
 
+// userMessage builds a user-role input message for the OpenAI responses API.
+func userMessage[T string | responses.ResponseInputMessageContentListParam](content T) responses.ResponseInputItemUnionParam {
+	return messageWithRole(content, responses.EasyInputMessageRoleUser)
+}
+
 // systemMessage builds a system-role input message for the OpenAI responses API.
-func systemMessage(text string) responses.ResponseInputItemUnionParam {
-	msg := responses.ResponseInputItemParamOfMessage(text, responses.EasyInputMessageRoleSystem)
-	if msg.OfMessage != nil {
-		msg.OfMessage.Type = responses.EasyInputMessageTypeMessage
-	}
-	return msg
+func systemMessage[T string | responses.ResponseInputMessageContentListParam](content T) responses.ResponseInputItemUnionParam {
+	return messageWithRole(content, responses.EasyInputMessageRoleSystem)
 }
 
 // filterFunctionCalls keeps only function_call output items.

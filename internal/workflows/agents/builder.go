@@ -1,12 +1,16 @@
 package agents
 
 import (
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
@@ -58,6 +62,8 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		return 0, err
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
+	layoutReviewRun := 0
+	enableLayoutReview := req.BuildTarget == BuildTargetResume
 
 	dispatcher := &builderDispatcher{
 		aiTools:     aiTools,
@@ -75,7 +81,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			activities.OpenAIResponsesRequest{
 				Model:          openai.ChatModelGPT5_2,
 				Input:          messages,
-				Tools:          append(aiTools, tools.BuildToolDesc),
+				Tools:          availableBuilderTools(aiTools, enableLayoutReview),
 				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
@@ -86,6 +92,45 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		if hasFunctionCalls(result.Output) {
 			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
 			continue
+		}
+
+		if enableLayoutReview {
+			// Layout review gate (resume only)
+			file, err := resolveBuildTargetFile(req.BuildTarget)
+			if err != nil {
+				return 0, err
+			}
+			layoutReviewRun++
+			layoutReviewReq := activities.ReviewPDFLayoutRequest{
+				ClientOptions: req.ClientOptions,
+				Branch:        req.BranchName,
+				Builder:       req.Builder,
+				File:          file,
+			}
+			layoutReviewResult, layoutReviewJSON, err := runLayoutReviewGate(
+				ctx,
+				MakeChildWorkflowID(ctx, "layout-review-gate", req.BranchName, strconv.Itoa(layoutReviewRun)),
+				layoutReviewReq,
+			)
+			if err != nil {
+				var appErr *temporal.ApplicationError
+				if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
+					var details []string
+					_ = appErr.Details(&details)
+					messages = responses.ResponseInputParam{userMessage(fmt.Sprintf(
+						"Build failed, fix and try again:\n%s",
+						strings.Join(details, "\n"),
+					))}
+					continue
+				}
+				return 0, err
+			}
+			if block, reason := shouldBlockLayoutIssues(layoutReviewResult, layoutReviewRun); block {
+				messages = responses.ResponseInputParam{userMessage(
+					"Layout review gate blocked completion (" + reason + "). Keep editing and rebuilding.\nCurrent findings JSON:\n" + layoutReviewJSON,
+				)}
+				continue
+			}
 		}
 
 		// Activate PR Builder workflow
@@ -141,9 +186,48 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.Respon
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
+	case tools.ReviewPDFLayoutToolDesc.OfFunction.Name:
+		if d.buildTarget != BuildTargetResume {
+			return nil, fmt.Errorf("review_pdf_layout is only available for resume builds")
+		}
+		args := tools.ReviewPDFLayoutArgs{}
+		if err := tools.ReviewPDFLayoutToolParseArgs(call.Arguments, &args); err != nil {
+			return nil, err
+		}
+
+		file, err := resolveBuildTargetFile(d.buildTarget)
+		if err != nil {
+			return nil, err
+		}
+
+		req := activities.ReviewPDFLayoutRequest{
+			ClientOptions: d.ghOpts,
+			Branch:        d.branchName,
+			Builder:       d.builder,
+			File:          file,
+			PageStart:     args.PageStart,
+			PageEnd:       args.PageEnd,
+			Focus:         args.Focus,
+		}
+		return workflow.ExecuteChildWorkflow(
+			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+				WorkflowID: MakeChildWorkflowID(ctx, "review-pdf-layout", d.branchName, call.CallID),
+			}),
+			ReviewPDFLayoutWorkflow,
+			req,
+		), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
+}
+
+func availableBuilderTools(aiTools []responses.ToolUnionParam, enableLayoutReview bool) []responses.ToolUnionParam {
+	ret := append([]responses.ToolUnionParam{}, aiTools...)
+	ret = append(ret, tools.BuildToolDesc)
+	if enableLayoutReview {
+		ret = append(ret, tools.ReviewPDFLayoutToolDesc)
+	}
+	return ret
 }
 
 var buildTargetMap = map[BuildTarget]string{
@@ -175,10 +259,15 @@ template to build the resume.
 - The Resume MUST be under 1 page. This will be checked by the build tool.
 - Only work in in the repository provided
 - Only work in the branch provided
+- After each successful build, run review_pdf_layout().
+- Always fix all high severity issues. Reduce medium issues as much as practical.
+- If the issue CANNOT be solved without changing formatting (editing resume.typ), you MUST ignore it.
+- Do not finish or open a PR if high issues remain.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
 - build(): Compile the resume and perform various checks
+- review_pdf_layout(): Render built pages and return structured visual layout defects with fix hints.
 `
 
 const CoverLetterBuilderInstructions = `
@@ -204,6 +293,9 @@ template to build the cover letter.
 - The Cover Letter MUST be under 1 page. This will be checked by the build tool.
 - Only work in in the repository provided
 - Only work in the branch provided
+- After each successful build, run review_pdf_layout().
+- Always fix all high severity issues. Reduce medium issues as much as practical.
+- Do not finish or open a PR if high issues remain.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
