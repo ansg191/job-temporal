@@ -1,8 +1,11 @@
 package workflows
 
 import (
+	"time"
+
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
 )
@@ -63,6 +66,17 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 		return "", err
 	}
 	if err = coverLetterFut.Get(ctx, nil); err != nil {
+		return "", err
+	}
+
+	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: time.Minute,
+	})
+	err = workflow.ExecuteActivity(activityCtx, activities.ProtectBranch, activities.ProtectBranchRequest{
+		ClientOptions: req.ClientOptions,
+		Branch:        branchName,
+	}).Get(activityCtx, nil)
+	if err != nil {
 		return "", err
 	}
 

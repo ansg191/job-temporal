@@ -64,6 +64,7 @@ func main() {
 	w.RegisterActivity(activities.CreatePullRequest)
 	w.RegisterActivity(activities.GetPullRequestBody)
 	w.RegisterActivity(activities.UpdatePullRequestBody)
+	w.RegisterActivity(activities.ProtectBranch)
 	w.RegisterActivity(activities.ListGithubTools)
 	w.RegisterActivity(activities.CallGithubTool)
 	w.RegisterActivity(activities.RegisterReviewReadyPR)

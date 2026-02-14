@@ -123,3 +123,21 @@ func UpdatePullRequestBody(ctx context.Context, req UpdatePullRequestBodyRequest
 
 	return client.UpdatePullRequestBody(ctx, req.PRNumber, req.Body)
 }
+
+type ProtectBranchRequest struct {
+	github.ClientOptions
+	Branch string
+}
+
+func ProtectBranch(ctx context.Context, req ProtectBranchRequest) error {
+	client, err := github.NewClient(req.ClientOptions)
+	if err != nil {
+		return temporal.NewNonRetryableApplicationError(
+			"failed to create github client",
+			"GithubClientError",
+			err,
+		)
+	}
+
+	return client.ProtectBranch(ctx, req.Branch)
+}

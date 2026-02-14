@@ -151,3 +151,26 @@ func (c *Client) UpdatePullRequestBody(ctx context.Context, prNumber int, body s
 	)
 	return err
 }
+
+func (c *Client) ProtectBranch(ctx context.Context, branch string) error {
+	lockBranch := true
+	allowForcePushes := false
+	allowDeletions := false
+
+	_, _, err := c.Repositories.UpdateBranchProtection(
+		ctx,
+		c.owner,
+		c.repo,
+		branch,
+		&github.ProtectionRequest{
+			RequiredStatusChecks:       nil,
+			RequiredPullRequestReviews: nil,
+			EnforceAdmins:              false,
+			Restrictions:               nil,
+			AllowForcePushes:           &allowForcePushes,
+			AllowDeletions:             &allowDeletions,
+			LockBranch:                 &lockBranch,
+		},
+	)
+	return err
+}
