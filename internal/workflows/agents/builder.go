@@ -81,7 +81,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			activities.OpenAIResponsesRequest{
 				Model:          openai.ChatModelGPT5_2,
 				Input:          messages,
-				Tools:          availableBuilderTools(aiTools, enableLayoutReview),
+				Tools:          availableBuilderTools(aiTools),
 				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
@@ -106,6 +106,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 				Branch:        req.BranchName,
 				Builder:       req.Builder,
 				File:          file,
+				Notes:         result.OutputText(),
 			}
 			layoutReviewResult, layoutReviewJSON, err := runLayoutReviewGate(
 				ctx,
@@ -186,47 +187,14 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.Respon
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
-	case tools.ReviewPDFLayoutToolDesc.OfFunction.Name:
-		if d.buildTarget != BuildTargetResume {
-			return nil, fmt.Errorf("review_pdf_layout is only available for resume builds")
-		}
-		args := tools.ReviewPDFLayoutArgs{}
-		if err := tools.ReviewPDFLayoutToolParseArgs(call.Arguments, &args); err != nil {
-			return nil, err
-		}
-
-		file, err := resolveBuildTargetFile(d.buildTarget)
-		if err != nil {
-			return nil, err
-		}
-
-		req := activities.ReviewPDFLayoutRequest{
-			ClientOptions: d.ghOpts,
-			Branch:        d.branchName,
-			Builder:       d.builder,
-			File:          file,
-			PageStart:     args.PageStart,
-			PageEnd:       args.PageEnd,
-			Focus:         args.Focus,
-		}
-		return workflow.ExecuteChildWorkflow(
-			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-				WorkflowID: MakeChildWorkflowID(ctx, "review-pdf-layout", d.branchName, call.CallID),
-			}),
-			ReviewPDFLayoutWorkflow,
-			req,
-		), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
 }
 
-func availableBuilderTools(aiTools []responses.ToolUnionParam, enableLayoutReview bool) []responses.ToolUnionParam {
+func availableBuilderTools(aiTools []responses.ToolUnionParam) []responses.ToolUnionParam {
 	ret := append([]responses.ToolUnionParam{}, aiTools...)
 	ret = append(ret, tools.BuildToolDesc)
-	if enableLayoutReview {
-		ret = append(ret, tools.ReviewPDFLayoutToolDesc)
-	}
 	return ret
 }
 
@@ -259,15 +227,21 @@ template to build the resume.
 - The Resume MUST be under 1 page. This will be checked by the build tool.
 - Only work in in the repository provided
 - Only work in the branch provided
-- After each successful build, run review_pdf_layout().
+- After you are done, a review workflow will take your notes & run to ensure the resume is well-formatted.
 - Always fix all high severity issues. Reduce medium issues as much as practical.
-- If the issue CANNOT be solved without changing formatting (editing resume.typ), you MUST ignore it.
+- If the issue CANNOT be solved without changing formatting (editing resume.typ), you MUST ignore it and output
+a note explaining why for the review workflow.
 - Do not finish or open a PR if high issues remain.
+
+OUTPUT FORMAT:
+Notes for the review workflow. Should be blank initially.
+When you fix an issue, explain how you fixed it in the notes.
+If you purposefully ignored issues, note them and explain why.
+These notes should be cumulative, including notes from all previous reviews.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
 - build(): Compile the resume and perform various checks
-- review_pdf_layout(): Render built pages and return structured visual layout defects with fix hints.
 `
 
 const CoverLetterBuilderInstructions = `
@@ -293,9 +267,6 @@ template to build the cover letter.
 - The Cover Letter MUST be under 1 page. This will be checked by the build tool.
 - Only work in in the repository provided
 - Only work in the branch provided
-- After each successful build, run review_pdf_layout().
-- Always fix all high severity issues. Reduce medium issues as much as practical.
-- Do not finish or open a PR if high issues remain.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.

@@ -25,6 +25,12 @@ not by changing formatting itself.
 For example, if a line break causes a single word to be on its own line, that is a defect
 which can be fixed by removing a word, adding words, or rewording the sentence.
 
+If you notice an invalid character, that is an OCR issue with special characters, so ignore it.
+
+The reviewer may provide notes in response to previous reviews,
+including what they changed and warnings they're ignoring on purpose.
+Take this into account.
+
 Rubric:
 1) line-break problems: awkward wraps, widows/orphans/runts, broken rhythm.
 2) whitespace balance: large empty regions, cramped blocks, uneven spacing.
@@ -58,7 +64,7 @@ func ReviewPDFLayoutWorkflow(ctx workflow.Context, req activities.ReviewPDFLayou
 		return "", err
 	}
 
-	reviewResult, err := analyzeLayoutReview(analyzeCtx, renderedPages, req.Focus)
+	reviewResult, err := analyzeLayoutReview(analyzeCtx, renderedPages, req.Notes)
 	if err != nil {
 		return "", err
 	}
@@ -136,18 +142,18 @@ func analyzeLayoutReview(
 	return &output, nil
 }
 
-func buildLayoutReviewUserPrompt(pages []activities.LayoutReviewRenderedPage, focus string) string {
+func buildLayoutReviewUserPrompt(pages []activities.LayoutReviewRenderedPage, notes string) string {
 	pageNums := make([]string, 0, len(pages))
 	for _, page := range pages {
 		pageNums = append(pageNums, fmt.Sprintf("%d", page.Page))
 	}
 	basePrompt := "Review pages " + strings.Join(pageNums, ", ") + " for visual typesetting quality. Return only the required JSON schema."
 
-	focus = strings.TrimSpace(focus)
-	if focus == "" {
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
 		return basePrompt
 	}
-	return basePrompt + " Additional focus: " + focus
+	return basePrompt + " Additional notes: " + notes
 }
 
 func sanitizeLayoutReviewIssues(issues []activities.ReviewPDFLayoutIssue) []activities.ReviewPDFLayoutIssue {

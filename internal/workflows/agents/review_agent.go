@@ -46,6 +46,9 @@ IMPORTANT NOTES:
   only use the user messages provided to you.
 - Keep iterating on layout quality as long as practical.
 - Always fix all high severity layout issues before stopping.
+- Make sure to pass notes of your changes to issues in review_pdf_layout's notes
+- If an issue CANNOT be solved without changing formatting (editing resume.typ), you MUST ignore it and output
+a note explaining why for the review workflow.
 
 AVAILABLE TOOLS:
 - Github MCP tools to read and edit files in the applicant's resume repository.
@@ -139,7 +142,6 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		}
 
 		var pdfUrl string
-		layoutReviewRun := 0
 		for {
 			var result *responses.Response
 			err = workflow.ExecuteActivity(
@@ -157,51 +159,6 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 			}
 
 			if !hasFunctionCalls(result.Output) {
-				if enableLayoutReview {
-					file, err := resolveBuildTargetFile(args.BuildTarget)
-					if err != nil {
-						return err
-					}
-					layoutReviewRun++
-					layoutReviewReq := activities.ReviewPDFLayoutRequest{
-						ClientOptions: args.Repo,
-						Branch:        args.BranchName,
-						Builder:       "typst",
-						File:          file,
-					}
-					layoutReviewResult, layoutReviewJSON, err := runLayoutReviewGate(
-						ctx,
-						MakeChildWorkflowID(
-							ctx,
-							"layout-review-gate",
-							args.BranchName,
-							strconv.Itoa(args.Pr),
-							strconv.Itoa(layoutReviewRun),
-						),
-						layoutReviewReq,
-					)
-					if err != nil {
-						var appErr *temporal.ApplicationError
-						if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
-							// Build failed, so kick back to Ai to fix
-							var details []string
-							_ = appErr.Details(&details)
-							pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
-								"Build failed, fix and try again: \n%s",
-								strings.Join(details, "\n"),
-							))}
-							continue
-						}
-						return err
-					}
-					if block, reason := shouldBlockLayoutIssues(layoutReviewResult, layoutReviewRun); block {
-						pendingInput = responses.ResponseInputParam{userMessage(
-							"Layout review gate blocked completion (" + reason + "). Keep editing and rebuilding.\nCurrent findings JSON:\n" + layoutReviewJSON,
-						)}
-						continue
-					}
-				}
-
 				// Finished with agent loop, rebuild the PDF
 				buildRun++
 				err = workflow.ExecuteChildWorkflow(
@@ -302,7 +259,7 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 			File:          file,
 			PageStart:     args.PageStart,
 			PageEnd:       args.PageEnd,
-			Focus:         args.Focus,
+			Notes:         args.Notes,
 		}
 		return workflow.ExecuteChildWorkflow(
 			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{

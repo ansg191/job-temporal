@@ -17,7 +17,7 @@ type reviewPDFLayoutToolArgs struct {
 type ReviewPDFLayoutArgs struct {
 	PageStart int
 	PageEnd   int
-	Focus     string
+	Notes     string
 }
 
 func ReviewPDFLayoutToolParseArgs(args string, req *ReviewPDFLayoutArgs) error {
@@ -33,7 +33,7 @@ func ReviewPDFLayoutToolParseArgs(args string, req *ReviewPDFLayoutArgs) error {
 
 	req.PageStart = toolArgs.PageStart
 	req.PageEnd = toolArgs.PageEnd
-	req.Focus = toolArgs.Focus
+	req.Notes = toolArgs.Focus
 	return nil
 }
 
@@ -55,12 +55,12 @@ var ReviewPDFLayoutToolDesc = responses.ToolUnionParam{
 					"description": "1-indexed end page to review. Use page_start for a single page.",
 					"minimum":     1,
 				},
-				"focus": map[string]any{
+				"notes": map[string]any{
 					"type":        "string",
-					"description": "Extra review focus areas. Use an empty string when none.",
+					"description": "Notes for the review workflow. Should be blank initially.\nWhen you fix an issue, explain how you fixed it in the notes.\nIf you purposefully ignored issues, note them and explain why.",
 				},
 			},
-			"required":             []string{"page_start", "page_end", "focus"},
+			"required":             []string{"page_start", "page_end", "notes"},
 			"additionalProperties": false,
 		},
 	},

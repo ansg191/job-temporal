@@ -33,7 +33,7 @@ type ReviewPDFLayoutRequest struct {
 	File      string `json:"file"`
 	PageStart int    `json:"page_start"`
 	PageEnd   int    `json:"page_end"`
-	Focus     string `json:"focus"`
+	Notes     string `json:"notes"`
 }
 
 type ReviewPDFLayoutIssue struct {
