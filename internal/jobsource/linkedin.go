@@ -120,12 +120,78 @@ func parseLinkedInDescription(r io.Reader) (string, error) {
 		return "", fmt.Errorf("description section not found")
 	}
 
-	markdown, err := htmltomarkdown.ConvertNode(target)
+	markdownBytes, err := htmltomarkdown.ConvertNode(target)
 	if err != nil {
 		return "", fmt.Errorf("convert linkedin html to markdown: %w", err)
 	}
+	markdown := string(markdownBytes)
 
-	return normalizeMarkdown(string(markdown)), nil
+	markdown = "### Description:\n\n" + markdown + "\n\n"
+
+	// Prepend criteria list
+	critList, err := findCriteriaList(doc)
+	if err != nil {
+		return "", err
+	}
+	markdown = critList + "\n\n" + markdown
+
+	// Prepend position
+	position, err := findPosition(doc)
+	if err != nil {
+		return "", err
+	}
+	markdown = position + "\n\n" + markdown
+
+	// Prepend company
+	company, err := findCompany(doc)
+	if err != nil {
+		return "", err
+	}
+	markdown = company + "\n\n" + markdown
+
+	return normalizeMarkdown(markdown), nil
+}
+
+func findPosition(root *html.Node) (string, error) {
+	target := findNodeWithClass(root, "topcard__title")
+	if target == nil {
+		return "", errors.New("position not found")
+	}
+
+	position := strings.TrimSpace(target.FirstChild.Data)
+	position = "## " + multiSpacePattern.ReplaceAllString(position, " ")
+	return position, nil
+}
+
+func findCompany(root *html.Node) (string, error) {
+	target := findNodeWithClass(root, "topcard__org-name-link")
+	if target == nil {
+		return "", errors.New("company not found")
+	}
+
+	company := strings.TrimSpace(target.FirstChild.Data)
+	company = "# " + multiSpacePattern.ReplaceAllString(company, " ")
+	return company, nil
+}
+
+func findCriteriaList(root *html.Node) (string, error) {
+	target := findNodeWithClass(root, "description__job-criteria-list")
+	if target == nil {
+		return "", errors.New("criteria list not found")
+	}
+
+	// Get description__job-criteria-item children of target
+	// This is a li that contains a h3 criteria key and span criteria value
+	var criteria []string
+	for child := target.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && child.Data == "li" {
+			criteriaKey := strings.TrimSpace(child.FirstChild.NextSibling.FirstChild.Data)
+			criteriaValue := strings.TrimSpace(child.FirstChild.NextSibling.NextSibling.NextSibling.FirstChild.Data)
+			criteria = append(criteria, fmt.Sprintf("**%s**: %s", criteriaKey, criteriaValue))
+		}
+	}
+
+	return "### Job Criteria:\n\n" + strings.Join(criteria, "\n\n"), nil
 }
 
 func findNodeWithClass(root *html.Node, classToken string) *html.Node {

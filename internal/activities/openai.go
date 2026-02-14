@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -240,6 +241,12 @@ func contextManagementOptions(model string) []option.RequestOption {
 func classifyOpenAIError(err error) error {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode == 400 && apiErr.Type == "invalid_request_error" {
+		// Some URL fetch failures are transient (e.g. storage edge/network hiccups)
+		// even though OpenAI returns them as 400 invalid_request_error.
+		if isRetryableURLDownloadTimeout(apiErr) {
+			return err
+		}
+
 		msg := "openai invalid request"
 		if apiErr.Param != "" {
 			msg += " (param: " + apiErr.Param + ")"
@@ -250,6 +257,14 @@ func classifyOpenAIError(err error) error {
 		return temporal.NewNonRetryableApplicationError(msg, "OpenAIInvalidRequestError", err)
 	}
 	return err
+}
+
+func isRetryableURLDownloadTimeout(apiErr *openai.Error) bool {
+	if apiErr == nil || apiErr.Param != "url" {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(apiErr.Message), "timeout while downloading")
 }
 
 func modelContextWindow(model string) (int64, bool) {
