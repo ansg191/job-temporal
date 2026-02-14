@@ -42,8 +42,8 @@ type OpenAIConversationRequest struct {
 	Items responses.ResponseInputParam `json:"items,omitempty"`
 }
 
-const aiPollInterval = 1 * time.Second
-const aiPollRequestTimeout = 2 * time.Second
+const aiPollInterval = 2 * time.Second
+const aiPollRequestTimeout = 5 * time.Second
 
 func GenerateTextFormat[T any](name string) *ResponseTextFormat {
 	schema, err := jsonschema.For[T](nil)

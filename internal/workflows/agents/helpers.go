@@ -67,6 +67,6 @@ func createConversation(ctx workflow.Context, items responses.ResponseInputParam
 func withCallAIActivityOptions(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 15 * time.Minute,
-		HeartbeatTimeout:    10 * time.Second,
+		HeartbeatTimeout:    15 * time.Second,
 	})
 }
