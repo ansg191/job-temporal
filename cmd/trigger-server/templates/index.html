@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Trigger</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="container">
+    <section class="panel">
+      <h1>Job Trigger</h1>
+      <p class="subtitle">Paste a GitHub repo and a job link to trigger the workflow.</p>
+      <form method="post" action="/submit">
+        <div>
+          <label for="repo">Repo (owner/repo)</label>
+          <input id="repo" name="repo" type="text" value="{{.Repo}}" placeholder="ansg191/resume" required>
+        </div>
+        <div>
+          <label for="jobUrl">JobUrl</label>
+          <input id="jobUrl" name="jobUrl" type="text" value="{{.JobURL}}" placeholder="https://www.linkedin.com/jobs/view/..." required>
+        </div>
+        <button type="submit">Submit</button>
+      </form>
+    </section>
+
+    {{if .Error}}
+    <div class="notice error">{{.Error}}</div>
+    {{end}}
+
+    {{if .Success}}
+    <div class="notice success">{{.Success}}</div>
+    {{end}}
+
+    {{if .Markdown}}
+    <section class="panel">
+      <h2>Scraped Markdown</h2>
+      <article class="markdown-output">{{.RenderedMarkdown}}</article>
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>
