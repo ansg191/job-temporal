@@ -21,6 +21,10 @@ type Database interface {
 	GetPrWorkflowId(ctx context.Context, prNumber int) (string, error)
 	// FinishPR marks a pull request as finished in the system.
 	FinishPR(ctx context.Context, prNumber int) error
+	// CreateJobRun inserts a new job run record.
+	CreateJobRun(ctx context.Context, workflowID, sourceURL, scrapedMarkdown string) error
+	// UpdateJobRunBranch sets the final branch name for a job run.
+	UpdateJobRunBranch(ctx context.Context, workflowID, branchName string) error
 }
 
 type postgresDatabase struct {
@@ -69,6 +73,20 @@ func (p *postgresDatabase) FinishPR(ctx context.Context, prNumber int) error {
 	_, err := p.db.ExecContext(ctx,
 		"UPDATE workflows SET finished = true WHERE pull_request_id = $1",
 		prNumber)
+	return err
+}
+
+func (p *postgresDatabase) CreateJobRun(ctx context.Context, workflowID, sourceURL, scrapedMarkdown string) error {
+	_, err := p.db.ExecContext(ctx,
+		"INSERT INTO job_runs (workflow_id, source_url, scraped_markdown) VALUES ($1, $2, $3)",
+		workflowID, sourceURL, scrapedMarkdown)
+	return err
+}
+
+func (p *postgresDatabase) UpdateJobRunBranch(ctx context.Context, workflowID, branchName string) error {
+	_, err := p.db.ExecContext(ctx,
+		"UPDATE job_runs SET branch_name = $1 WHERE workflow_id = $2",
+		branchName, workflowID)
 	return err
 }
 

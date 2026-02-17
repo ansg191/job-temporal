@@ -69,6 +69,8 @@ func main() {
 	w.RegisterActivity(activities.CallGithubTool)
 	w.RegisterActivity(activities.RegisterReviewReadyPR)
 	w.RegisterActivity(activities.FinishReview)
+	w.RegisterActivity(activities.CreateJobRun)
+	w.RegisterActivity(activities.UpdateJobRunBranch)
 	w.RegisterActivity(activities.GetAgentConfig)
 
 	err = w.Run(worker.InterruptCh())
