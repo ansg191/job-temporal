@@ -19,6 +19,7 @@ require (
 	github.com/yuin/goldmark v1.7.13
 	go.temporal.io/sdk v1.39.0
 	golang.org/x/net v0.47.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -77,5 +78,4 @@ require (
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
