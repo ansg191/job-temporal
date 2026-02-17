@@ -19,6 +19,9 @@ type AgentConfig struct {
 // DefaultConfigDir is the default directory for agent configuration files
 const DefaultConfigDir = "config/agents/"
 
+// validAgentName matches safe agent config names (lowercase alphanumeric, underscore, hyphen).
+var validAgentName = regexp.MustCompile(`^[a-z0-9_-]+$`)
+
 // getConfigDir returns the agent config directory from env var or default
 func getConfigDir() string {
 	if dir := os.Getenv("AGENT_CONFIG_DIR"); dir != "" {
@@ -30,11 +33,7 @@ func getConfigDir() string {
 // LoadAgentConfig loads agent configuration from a YAML file
 func LoadAgentConfig(agentName string) (*AgentConfig, error) {
 	// Validate agent name to prevent path traversal
-	matched, err := regexp.MatchString(`^[a-z0-9_-]+$`, agentName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate agent name: %w", err)
-	}
-	if !matched {
+	if !validAgentName.MatchString(agentName) {
 		return nil, fmt.Errorf("invalid agent name %q: must match [a-z0-9_-]+", agentName)
 	}
 
@@ -64,6 +63,3 @@ func LoadAgentConfig(agentName string) (*AgentConfig, error) {
 
 	return &config, nil
 }
-
-
-
