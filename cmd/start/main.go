@@ -58,7 +58,8 @@ func main() {
 				Owner: "ansg191",
 				Repo:  "resume",
 			},
-			JobDesc: jobDesc,
+			JobDesc:   jobDesc,
+			SourceURL: input,
 		},
 	)
 	if err != nil {
