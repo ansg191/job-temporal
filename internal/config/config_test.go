@@ -14,7 +14,7 @@ func TestLoadAgentConfig_ValidFile(t *testing.T) {
 	// Create a valid YAML config file
 	configContent := `instructions: "Test instructions for agent"
 model: "gpt-4"
-temperature: 0.7
+temperature: 0.75
 `
 	configPath := filepath.Join(tmpDir, "test-agent.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -41,8 +41,8 @@ temperature: 0.7
 	}
 	if config.Temperature == nil {
 		t.Error("Expected temperature to be set")
-	} else if *config.Temperature != 0.7 {
-		t.Errorf("Expected temperature 0.7, got %f", *config.Temperature)
+	} else if *config.Temperature != 0.75 {
+		t.Errorf("Expected temperature 0.75, got %f", *config.Temperature)
 	}
 }
 
