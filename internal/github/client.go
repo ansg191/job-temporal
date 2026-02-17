@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 
@@ -129,10 +130,12 @@ func (c *Client) CreatePullRequest(ctx context.Context, title, description, head
 	}
 
 	if err := c.ensurePurposeLabelsExist(ctx); err != nil {
-		return 0, err
+		log.Printf("warning: failed to ensure purpose labels exist for PR #%d: %v", pr.GetNumber(), err)
+		return pr.GetNumber(), nil
 	}
 	if _, _, err := c.Issues.AddLabelsToIssue(ctx, c.owner, c.repo, pr.GetNumber(), []string{purposeLabel}); err != nil {
-		return 0, err
+		log.Printf("warning: failed to add purpose label %q to PR #%d: %v", purposeLabel, pr.GetNumber(), err)
+		return pr.GetNumber(), nil
 	}
 
 	return pr.GetNumber(), nil
