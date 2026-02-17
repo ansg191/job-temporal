@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/config"
 	"github.com/ansg191/job-temporal/internal/database"
 	"github.com/ansg191/job-temporal/internal/workflows"
 	"github.com/ansg191/job-temporal/internal/workflows/agents"
@@ -69,6 +70,7 @@ func main() {
 	w.RegisterActivity(activities.CallGithubTool)
 	w.RegisterActivity(activities.RegisterReviewReadyPR)
 	w.RegisterActivity(activities.FinishReview)
+	w.RegisterActivity(config.GetAgentConfig)
 
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
