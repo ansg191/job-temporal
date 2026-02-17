@@ -78,7 +78,8 @@ func (p *postgresDatabase) FinishPR(ctx context.Context, prNumber int) error {
 
 func (p *postgresDatabase) CreateJobRun(ctx context.Context, workflowID, sourceURL, scrapedMarkdown string) error {
 	_, err := p.db.ExecContext(ctx,
-		"INSERT INTO job_runs (workflow_id, source_url, scraped_markdown) VALUES ($1, $2, $3)",
+		"INSERT INTO job_runs (workflow_id, source_url, scraped_markdown) VALUES ($1, $2, $3) "+
+			"ON CONFLICT (workflow_id) DO NOTHING",
 		workflowID, sourceURL, scrapedMarkdown)
 	return err
 }
