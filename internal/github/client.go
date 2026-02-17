@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v81/github"
@@ -20,6 +21,8 @@ type ClientOptions struct {
 	Owner string `json:"owner"`
 	Repo  string `json:"repo"`
 }
+
+var supportedPRPurposeLabels = []string{"resume", "cover letter"}
 
 func NewClient(opts ClientOptions) (*Client, error) {
 	itr, err := getTransport()
@@ -104,7 +107,11 @@ func (c *Client) CreateBranch(ctx context.Context, branch string) error {
 	return err
 }
 
-func (c *Client) CreatePullRequest(ctx context.Context, title, description, head, base string) (int, error) {
+func (c *Client) CreatePullRequest(ctx context.Context, title, description, head, base, purposeLabel string) (int, error) {
+	if !slices.Contains(supportedPRPurposeLabels, purposeLabel) {
+		return 0, fmt.Errorf("invalid purpose label %q", purposeLabel)
+	}
+
 	pr, _, err := c.PullRequests.Create(
 		ctx,
 		c.owner,
@@ -120,7 +127,49 @@ func (c *Client) CreatePullRequest(ctx context.Context, title, description, head
 	if err != nil {
 		return 0, err
 	}
+
+	if err := c.ensurePurposeLabelsExist(ctx); err != nil {
+		return 0, err
+	}
+	if _, _, err := c.Issues.AddLabelsToIssue(ctx, c.owner, c.repo, pr.GetNumber(), []string{purposeLabel}); err != nil {
+		return 0, err
+	}
+
 	return pr.GetNumber(), nil
+}
+
+func (c *Client) ensurePurposeLabelsExist(ctx context.Context) error {
+	existing := make(map[string]struct{}, len(supportedPRPurposeLabels))
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		labels, resp, err := c.Issues.ListLabels(ctx, c.owner, c.repo, opts)
+		if err != nil {
+			return err
+		}
+		for _, label := range labels {
+			existing[label.GetName()] = struct{}{}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	for _, label := range supportedPRPurposeLabels {
+		if _, ok := existing[label]; ok {
+			continue
+		}
+		name := label
+		_, _, err := c.Issues.CreateLabel(ctx, c.owner, c.repo, &github.Label{Name: &name})
+		if err != nil {
+			if ghErr, ok := err.(*github.ErrorResponse); ok && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusUnprocessableEntity {
+				// Label already created by a concurrent request.
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) GetBranchHeadSHA(ctx context.Context, branch string) (string, error) {

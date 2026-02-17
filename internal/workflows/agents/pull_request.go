@@ -24,6 +24,11 @@ var prOutputFormat = activities.GenerateTextFormat[prOutput]("pr_output")
 
 const prArtifactLinePrefix = "PDF Artifact:"
 
+const (
+	purposeLabelResume      = "resume"
+	purposeLabelCoverLetter = "cover letter"
+)
+
 // Deprecated: PullRequestInstructions is kept for rollback safety. Use GetAgentConfig("pull_request") instead.
 const PullRequestInstructions = `
 You are a pull request agent who creates pull requests for the repository.
@@ -159,17 +164,33 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 		}
 
 		var prNum int
+		purposeLabel, err := purposeLabelForBuildTarget(req.BuildTarget)
+		if err != nil {
+			return 0, err
+		}
 		err = workflow.ExecuteActivity(ctx, activities.CreatePullRequest, activities.CreatePullRequestRequest{
 			ClientOptions: req.ClientOptions,
 			Title:         pr.Title,
 			Description:   pr.Body,
 			Head:          req.Branch,
 			Base:          req.Target,
+			PurposeLabel:  purposeLabel,
 		}).Get(ctx, &prNum)
 		if err != nil {
 			return 0, err
 		}
 		return prNum, nil
+	}
+}
+
+func purposeLabelForBuildTarget(target BuildTarget) (string, error) {
+	switch target {
+	case BuildTargetResume:
+		return purposeLabelResume, nil
+	case BuildTargetCoverLetter:
+		return purposeLabelCoverLetter, nil
+	default:
+		return "", fmt.Errorf("invalid build target for pull request label: %d", target)
 	}
 }
 
