@@ -12,13 +12,27 @@ import (
 
 type JobWorkflowRequest struct {
 	github.ClientOptions
-	JobDesc string `json:"job_desc"`
+	JobDesc   string `json:"job_desc"`
+	SourceURL string `json:"source_url"`
 }
 
 func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
+	// Create job run record in database
+	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: time.Minute,
+	})
+	err := workflow.ExecuteActivity(activityCtx, activities.CreateJobRun, activities.CreateJobRunRequest{
+		WorkflowID:      workflow.GetInfo(ctx).WorkflowExecution.ID,
+		SourceURL:       req.SourceURL,
+		ScrapedMarkdown: req.JobDesc,
+	}).Get(activityCtx, nil)
+	if err != nil {
+		return "", err
+	}
+
 	// Create new final branch to merge changes into
 	var branchName string
-	err := workflow.ExecuteChildWorkflow(
+	err = workflow.ExecuteChildWorkflow(
 		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
 			WorkflowID: agents.MakeChildWorkflowID(ctx, "branch-name-agent", "final"),
 		}),
@@ -29,6 +43,15 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 			Purpose:        agents.BranchNameAgentPurposeFinal,
 		},
 	).Get(ctx, &branchName)
+	if err != nil {
+		return "", err
+	}
+
+	// Update job run record with branch name
+	err = workflow.ExecuteActivity(activityCtx, activities.UpdateJobRunBranch, activities.UpdateJobRunBranchRequest{
+		WorkflowID: workflow.GetInfo(ctx).WorkflowExecution.ID,
+		BranchName: branchName,
+	}).Get(activityCtx, nil)
 	if err != nil {
 		return "", err
 	}
@@ -69,9 +92,6 @@ func JobWorkflow(ctx workflow.Context, req JobWorkflowRequest) (string, error) {
 		return "", err
 	}
 
-	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: time.Minute,
-	})
 	err = workflow.ExecuteActivity(activityCtx, activities.ProtectBranch, activities.ProtectBranchRequest{
 		ClientOptions: req.ClientOptions,
 		Branch:        branchName,

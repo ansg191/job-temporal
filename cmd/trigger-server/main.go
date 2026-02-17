@@ -144,6 +144,7 @@ func (a *app) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		workflows.JobWorkflowRequest{
 			ClientOptions: github.ClientOptions{Owner: owner, Repo: repo},
 			JobDesc:       jobDesc,
+			SourceURL:     jobURL,
 		},
 	)
 	if err != nil {
