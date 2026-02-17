@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -35,13 +34,18 @@ type BuilderAgentRequest struct {
 }
 
 func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
-	instructions, ok := buildTargetMap[req.BuildTarget]
+	agentName, ok := buildTargetAgentName[req.BuildTarget]
 	if !ok {
 		return 0, fmt.Errorf("invalid build target: %d", req.BuildTarget)
 	}
 
+	agentCfg, err := loadAgentConfig(ctx, agentName)
+	if err != nil {
+		return 0, err
+	}
+
 	messages := responses.ResponseInputParam{
-		systemMessage(instructions),
+		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + req.Owner + "/" + req.Repo),
 		userMessage("Branch Name: " + req.BranchName),
 		userMessage("Job Application:\n" + req.Job),
@@ -53,7 +57,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	var aiTools []responses.ToolUnionParam
-	err := workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
+	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
 	}
@@ -79,9 +83,10 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			callAICtx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:          openai.ChatModelGPT5_2,
+				Model:          agentCfg.Model,
 				Input:          messages,
 				Tools:          availableBuilderTools(aiTools),
+				Temperature:    temperatureOpt(agentCfg.Temperature),
 				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
@@ -198,11 +203,19 @@ func availableBuilderTools(aiTools []responses.ToolUnionParam) []responses.ToolU
 	return ret
 }
 
+// buildTargetAgentName maps BuildTarget to the YAML config agent name.
+var buildTargetAgentName = map[BuildTarget]string{
+	BuildTargetResume:      "builder_resume",
+	BuildTargetCoverLetter: "builder_cover_letter",
+}
+
+// Deprecated: buildTargetMap is kept for rollback safety. Use GetAgentConfig with buildTargetAgentName instead.
 var buildTargetMap = map[BuildTarget]string{
 	BuildTargetResume:      ResumeBuilderInstructions,
 	BuildTargetCoverLetter: CoverLetterBuilderInstructions,
 }
 
+// Deprecated: ResumeBuilderInstructions is kept for rollback safety. Use GetAgentConfig("builder_resume") instead.
 const ResumeBuilderInstructions = `
 You are a resume builder who creates personalized resumes for applicants that
 are specialized for specific applications.
@@ -244,6 +257,7 @@ AVAILABLE TOOLS:
 - build(): Compile the resume and perform various checks
 `
 
+// Deprecated: CoverLetterBuilderInstructions is kept for rollback safety. Use GetAgentConfig("builder_cover_letter") instead.
 const CoverLetterBuilderInstructions = `
 You are a cover letter builder who creates personalized cover letters for applicants that
 are specialized for specific applications.

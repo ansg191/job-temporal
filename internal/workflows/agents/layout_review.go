@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
@@ -16,6 +15,7 @@ import (
 	"github.com/ansg191/job-temporal/internal/activities"
 )
 
+// Deprecated: layoutReviewSystemPrompt is kept for rollback safety. Use GetAgentConfig("layout_review") instead.
 const layoutReviewSystemPrompt = `
 You are a strict PDF typesetting reviewer for resumes and cover letters.
 Review rendered page images and identify only concrete visual/layout defects.
@@ -51,20 +51,25 @@ Rules:
 `
 
 func ReviewPDFLayoutWorkflow(ctx workflow.Context, req activities.ReviewPDFLayoutRequest) (string, error) {
+	agentCfg, err := loadAgentConfig(ctx, "layout_review")
+	if err != nil {
+		return "", err
+	}
+
 	renderCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 3 * time.Minute,
 	})
 	analyzeCtx := withCallAIActivityOptions(ctx)
 
 	var renderedPages []activities.LayoutReviewRenderedPage
-	err := workflow.ExecuteActivity(renderCtx, activities.RenderLayoutReviewPages, activities.RenderLayoutReviewPagesRequest{
+	err = workflow.ExecuteActivity(renderCtx, activities.RenderLayoutReviewPages, activities.RenderLayoutReviewPagesRequest{
 		ReviewPDFLayoutRequest: req,
 	}).Get(ctx, &renderedPages)
 	if err != nil {
 		return "", err
 	}
 
-	reviewResult, err := analyzeLayoutReview(analyzeCtx, renderedPages, req.Notes)
+	reviewResult, err := analyzeLayoutReview(analyzeCtx, agentCfg.Instructions, agentCfg.Model, agentCfg.Temperature, renderedPages, req.Notes)
 	if err != nil {
 		return "", err
 	}
@@ -87,6 +92,9 @@ func ReviewPDFLayoutWorkflow(ctx workflow.Context, req activities.ReviewPDFLayou
 
 func analyzeLayoutReview(
 	ctx workflow.Context,
+	instructions string,
+	model string,
+	temperature *float64,
 	pages []activities.LayoutReviewRenderedPage,
 	focus string,
 ) (*activities.ReviewPDFLayoutOutput, error) {
@@ -106,7 +114,7 @@ func analyzeLayoutReview(
 	}
 
 	input := responses.ResponseInputParam{
-		systemMessage(layoutReviewSystemPrompt),
+		systemMessage(instructions),
 		userMessage(content),
 	}
 
@@ -115,9 +123,10 @@ func analyzeLayoutReview(
 		withCallAIActivityOptions(ctx),
 		activities.CallAI,
 		activities.OpenAIResponsesRequest{
-			Model: openai.ChatModelGPT5_2,
-			Input: input,
-			Text:  activities.LayoutReviewTextFormat,
+			Model:       model,
+			Input:       input,
+			Text:        activities.LayoutReviewTextFormat,
+			Temperature: temperatureOpt(temperature),
 		},
 	).Get(ctx, &result)
 	if err != nil {

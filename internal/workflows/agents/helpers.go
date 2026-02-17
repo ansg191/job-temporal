@@ -3,10 +3,13 @@ package agents
 import (
 	"time"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/config"
 )
 
 func messageWithRole[T string | responses.ResponseInputMessageContentListParam](
@@ -69,4 +72,25 @@ func withCallAIActivityOptions(ctx workflow.Context) workflow.Context {
 		StartToCloseTimeout: 15 * time.Minute,
 		HeartbeatTimeout:    15 * time.Second,
 	})
+}
+
+// loadAgentConfig executes the GetAgentConfig activity and returns the agent configuration.
+func loadAgentConfig(ctx workflow.Context, agentName string) (*config.AgentConfig, error) {
+	configCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 5 * time.Second,
+	})
+	var agentCfg config.AgentConfig
+	err := workflow.ExecuteActivity(configCtx, config.GetAgentConfig, agentName).Get(ctx, &agentCfg)
+	if err != nil {
+		return nil, err
+	}
+	return &agentCfg, nil
+}
+
+// temperatureOpt converts a *float64 config temperature to the param.Opt type used by OpenAI.
+func temperatureOpt(t *float64) (opt param.Opt[float64]) {
+	if t != nil {
+		opt = openai.Float(*t)
+	}
+	return
 }

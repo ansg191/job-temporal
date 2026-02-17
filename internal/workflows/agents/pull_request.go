@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
@@ -25,6 +24,7 @@ var prOutputFormat = activities.GenerateTextFormat[prOutput]("pr_output")
 
 const prArtifactLinePrefix = "PDF Artifact:"
 
+// Deprecated: PullRequestInstructions is kept for rollback safety. Use GetAgentConfig("pull_request") instead.
 const PullRequestInstructions = `
 You are a pull request agent who creates pull requests for the repository.
 These pull requests are created from branches that were created by previous agents.
@@ -68,13 +68,18 @@ type PullRequestAgentRequest struct {
 }
 
 func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, error) {
+	agentCfg, err := loadAgentConfig(ctx, "pull_request")
+	if err != nil {
+		return 0, err
+	}
+
 	builderType := req.Builder
 	if builderType == "" {
 		builderType = "typst"
 	}
 
 	var pdfURL string
-	err := workflow.ExecuteChildWorkflow(
+	err = workflow.ExecuteChildWorkflow(
 		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
 			WorkflowID: MakeChildWorkflowID(ctx, "build-upload-pdf", req.Branch, builderType),
 		}),
@@ -91,7 +96,7 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	}
 
 	messages := responses.ResponseInputParam{
-		systemMessage(PullRequestInstructions),
+		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + req.Owner + "/" + req.Repo),
 		userMessage("Branch Name: " + req.Branch),
 		userMessage("Job description: " + req.Job),
@@ -122,10 +127,11 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 			callAICtx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model:          openai.ChatModelGPT5_2,
+				Model:          agentCfg.Model,
 				Input:          messages,
 				Tools:          aiTools,
 				Text:           prOutputFormat,
+				Temperature:    temperatureOpt(agentCfg.Temperature),
 				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
