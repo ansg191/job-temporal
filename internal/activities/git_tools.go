@@ -50,10 +50,11 @@ func CreateBranch(ctx context.Context, req CreateBranchRequest) error {
 
 type CreatePullRequestRequest struct {
 	github.ClientOptions
-	Title       string
-	Description string
-	Head        string
-	Base        string
+	Title        string
+	Description  string
+	Head         string
+	Base         string
+	PurposeLabel string
 }
 
 func CreatePullRequest(ctx context.Context, req CreatePullRequestRequest) (int, error) {
@@ -66,7 +67,7 @@ func CreatePullRequest(ctx context.Context, req CreatePullRequestRequest) (int, 
 		)
 	}
 
-	return client.CreatePullRequest(ctx, req.Title, req.Description, req.Head, req.Base)
+	return client.CreatePullRequest(ctx, req.Title, req.Description, req.Head, req.Base, req.PurposeLabel)
 }
 
 type GetBranchHeadSHARequest struct {
