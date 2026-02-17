@@ -27,4 +27,9 @@ RUN mkdir -p /opt/custom-fonts \
 
 COPY --from=builder /out/worker /usr/local/bin/worker
 
+WORKDIR /app
+
+# Copy agent config YAML files (read by GetAgentConfig activity via AGENT_CONFIG_DIR)
+COPY config/agents/ config/agents/
+
 ENTRYPOINT ["/usr/local/bin/worker"]

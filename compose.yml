@@ -106,6 +106,9 @@ services:
       AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
       R2_BUCKET: ${R2_BUCKET:-}
       R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      # AGENT_CONFIG_DIR — directory for agent YAML config files.
+      # Defaults to "config/agents/" (relative to WORKDIR /app in the container).
+      # Override to use a custom path, e.g. AGENT_CONFIG_DIR=/etc/job-temporal/agents/
     volumes:
       - type: bind
         source: ${GITHUB_APP_PRIVATE_KEY}
@@ -118,6 +121,11 @@ services:
       - type: bind
         source: /System/Library/Fonts/Supplemental
         target: /System/Library/Fonts/Supplemental
+        read_only: true
+      # Mount config directory for local dev (allows hot-reload on worker restart)
+      - type: bind
+        source: ./config/agents
+        target: /app/config/agents
         read_only: true
 
 volumes:
