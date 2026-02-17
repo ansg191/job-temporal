@@ -1,10 +1,10 @@
 package config
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,16 +16,28 @@ type AgentConfig struct {
 	Temperature  *float64 `yaml:"temperature,omitempty" json:"temperature,omitempty"`
 }
 
+// DefaultConfigDir is the default directory for agent configuration files
+const DefaultConfigDir = "config/agents/"
+
 // getConfigDir returns the agent config directory from env var or default
 func getConfigDir() string {
 	if dir := os.Getenv("AGENT_CONFIG_DIR"); dir != "" {
 		return dir
 	}
-	return "config/agents/"
+	return DefaultConfigDir
 }
 
-// loadAgentConfig loads agent configuration from a YAML file
-func loadAgentConfig(agentName string) (*AgentConfig, error) {
+// LoadAgentConfig loads agent configuration from a YAML file
+func LoadAgentConfig(agentName string) (*AgentConfig, error) {
+	// Validate agent name to prevent path traversal
+	matched, err := regexp.MatchString(`^[a-z0-9_-]+$`, agentName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate agent name: %w", err)
+	}
+	if !matched {
+		return nil, fmt.Errorf("invalid agent name %q: must match [a-z0-9_-]+", agentName)
+	}
+
 	configDir := getConfigDir()
 	configPath := filepath.Join(configDir, agentName+".yaml")
 
@@ -42,11 +54,16 @@ func loadAgentConfig(agentName string) (*AgentConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", configPath, err)
 	}
 
+	// Validate required fields
+	if config.Instructions == "" {
+		return nil, fmt.Errorf("config file %s: instructions field is empty", configPath)
+	}
+	if config.Model == "" {
+		return nil, fmt.Errorf("config file %s: model field is empty", configPath)
+	}
+
 	return &config, nil
 }
 
-// GetAgentConfig is a Temporal activity that loads agent configuration
-func GetAgentConfig(ctx context.Context, agentName string) (*AgentConfig, error) {
-	return loadAgentConfig(agentName)
-}
+
 

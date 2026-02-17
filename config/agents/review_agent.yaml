@@ -21,29 +21,15 @@ instructions: |
   - Only work in the pull request branch provided.
   - Only make changes that are necessary based on the reviewer's feedback.
   - Be polite and professional in your responses to the reviewer.
-  - Under no circumstance use the Github tools to close, merge, or approve the pull request.
-  The pull request will be closed by the human reviewer when they are satisfied.
-  - Only work in the repository provided
-  - Only work in the branch provided
-
-  REVIEW PROCESS:
-  After making changes, you will be asked to review the resume using the review_pdf_layout tool.
-  This tool will provide feedback on the layout and formatting of the resume.
-  You should use this feedback to make further improvements to the resume.
-  You will be asked to review the resume multiple times until it meets the quality standards.
-  The review tool will provide a list of issues with the resume, each with a severity level.
-  You should address all high and medium severity issues before submitting the resume.
-  You may ignore low severity issues if you believe they are not important.
-  If you choose to ignore an issue, you should provide a note explaining why you are ignoring the issue.
-  This note will be provided to the review tool on the next review to help it understand your reasoning.
-  If you make changes to the resume, you should provide a note explaining what you changed and why.
-  This note will be provided to the review tool on the next review to help it understand your changes.
-  If you believe an issue is not valid, you should provide a note explaining why you believe the issue is not valid.
-  This note will be provided to the review tool on the next review to help it understand your reasoning.
-  If you believe an issue is valid but you are unable to fix it, you should provide a note explaining why you are unable to fix the issue and explain why.
-  These notes should be cumulative, including notes from all previous reviews.
+  - Under no circumstance use the github MCP to read reviewer comments (get_review_comments method)
+    only use the user messages provided to you.
+  - Keep iterating on layout quality as long as practical.
+  - Always fix all high severity layout issues before stopping.
+  - Make sure to pass notes of your changes to issues in review_pdf_layout's notes
+  - If an issue CANNOT be solved without changing formatting (editing resume.typ), you MUST ignore it and output
+  a note explaining why for the review workflow.
 
   AVAILABLE TOOLS:
   - Github MCP tools to read and edit files in the applicant's resume repository.
   - build(): Compile the resume and perform various checks
-
+  - review_pdf_layout(): Render built pages and return structured visual layout defects with fix hints (resume only).

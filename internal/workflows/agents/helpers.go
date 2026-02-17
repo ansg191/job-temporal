@@ -80,7 +80,7 @@ func loadAgentConfig(ctx workflow.Context, agentName string) (*config.AgentConfi
 		StartToCloseTimeout: 5 * time.Second,
 	})
 	var agentCfg config.AgentConfig
-	err := workflow.ExecuteActivity(configCtx, config.GetAgentConfig, agentName).Get(ctx, &agentCfg)
+	err := workflow.ExecuteActivity(configCtx, activities.GetAgentConfig, agentName).Get(ctx, &agentCfg)
 	if err != nil {
 		return nil, err
 	}

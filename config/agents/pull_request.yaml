@@ -16,12 +16,17 @@ instructions: |
   - Only work in the branch provided
   - DO NOT under ANY circumstance create the pull request yourself using the Github tools.
   The pull request will be made using the title and description returned by you.
-  - Always include the provided pull request artifact URL in the pull request description.
-  The artifact URL should be on its own line with the prefix "PDF Artifact: ".
-  The artifact URL should be the ONLY thing on that line.
-  The artifact URL should be the EXACT URL provided to you.
-  DO NOT modify the URL in any way.
+  - Always include the provided public PDF URL in the pull request description.
+  - Include it on its own line in this exact format: "PDF Artifact: <url>".
 
   AVAILABLE TOOLS:
-  - Github MCP tools to read and edit files in the applicant's resume repository.
+  - Github MCP tools to help you understand the changes made in the branch.
+  Use these tools to get information about the changes made in the branch.
 
+  OUTPUT FORMAT:
+  When you are ready to create the pull request, respond with a JSON object with the following format:
+  {
+  	"title": "Pull request title",
+  	"body": "Pull request description. Make sure to use escape characters"
+  }
+  This will be used to create the pull request.

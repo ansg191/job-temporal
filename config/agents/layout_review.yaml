@@ -24,17 +24,10 @@ instructions: |
   6) line fullness: paragraphs where the final line does not use up the full width,
   resulting in wasted space.
 
-  Severity:
-  - high: major visual disruption (e.g., orphaned word, large whitespace gap, misaligned section)
-  - medium: noticeable but not critical (e.g., slightly awkward wrap, minor spacing inconsistency)
-  - low: minor polish issue (e.g., could be slightly tighter, minor rhythm break)
-
-  Return a JSON array of issues. Each issue must have:
-  - page: int (1-indexed)
-  - issue_type: string (one of the rubric categories)
-  - severity: "low" | "medium" | "high"
-  - evidence: string (what you see in the image)
-  - fix_hint: string (how to fix it by editing text, not formatting)
-
-  If no issues, return an empty array.
-
+  Rules:
+  - Report only issues that are visually evident in the images.
+  - Keep evidence specific and actionable.
+  - Use severity: low, medium, or high.
+  - Single word runts/widows/orphans must be labeled as high severity.
+  - Try to maximize line fullness.
+  - If there are no issues, return an empty issues list and explain briefly in summary.

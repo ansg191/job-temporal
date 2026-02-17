@@ -1,9 +1,9 @@
 package config
 
 import (
-	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +27,7 @@ temperature: 0.7
 	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
 
 	// Load config
-	config, err := loadAgentConfig("test-agent")
+	config, err := LoadAgentConfig("test-agent")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -56,14 +56,14 @@ func TestLoadAgentConfig_MissingFile(t *testing.T) {
 	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
 
 	// Try to load non-existent config
-	_, err := loadAgentConfig("nonexistent-agent")
+	_, err := LoadAgentConfig("nonexistent-agent")
 	if err == nil {
 		t.Fatal("Expected error for missing file, got nil")
 	}
 
 	// Check error message contains expected info
 	expectedSubstr := "config file not found"
-	if !contains(err.Error(), expectedSubstr) {
+	if !strings.Contains(err.Error(), expectedSubstr) {
 		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
 	}
 }
@@ -88,27 +88,27 @@ temperature: not a number
 	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
 
 	// Try to load malformed config
-	_, err := loadAgentConfig("malformed-agent")
+	_, err := LoadAgentConfig("malformed-agent")
 	if err == nil {
 		t.Fatal("Expected error for malformed YAML, got nil")
 	}
 
 	// Check error message contains expected info
 	expectedSubstr := "failed to parse config file"
-	if !contains(err.Error(), expectedSubstr) {
+	if !strings.Contains(err.Error(), expectedSubstr) {
 		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
 	}
 }
 
-func TestGetAgentConfig_Activity(t *testing.T) {
+func TestLoadAgentConfig_EmptyInstructions(t *testing.T) {
 	// Create temp directory
 	tmpDir := t.TempDir()
 
-	// Create a valid YAML config file
-	configContent := `instructions: "Activity test instructions"
-model: "gpt-3.5-turbo"
+	// Create a YAML config file with empty instructions
+	configContent := `instructions: ""
+model: "gpt-4"
 `
-	configPath := filepath.Join(tmpDir, "activity-test.yaml")
+	configPath := filepath.Join(tmpDir, "empty-instructions.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write test config: %v", err)
 	}
@@ -118,35 +118,91 @@ model: "gpt-3.5-turbo"
 	os.Setenv("AGENT_CONFIG_DIR", tmpDir)
 	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
 
-	// Call activity function
-	ctx := context.Background()
-	config, err := GetAgentConfig(ctx, "activity-test")
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
+	// Try to load config with empty instructions
+	_, err := LoadAgentConfig("empty-instructions")
+	if err == nil {
+		t.Fatal("Expected error for empty instructions, got nil")
 	}
 
-	// Verify fields
-	if config.Instructions != "Activity test instructions" {
-		t.Errorf("Expected instructions 'Activity test instructions', got %q", config.Instructions)
-	}
-	if config.Model != "gpt-3.5-turbo" {
-		t.Errorf("Expected model 'gpt-3.5-turbo', got %q", config.Model)
-	}
-	if config.Temperature != nil {
-		t.Errorf("Expected temperature to be nil, got %v", config.Temperature)
+	// Check error message contains expected info
+	expectedSubstr := "instructions field is empty"
+	if !strings.Contains(err.Error(), expectedSubstr) {
+		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsHelper(s, substr))
+func TestLoadAgentConfig_EmptyModel(t *testing.T) {
+	// Create temp directory
+	tmpDir := t.TempDir()
+
+	// Create a YAML config file with empty model
+	configContent := `instructions: "Test instructions"
+model: ""
+`
+	configPath := filepath.Join(tmpDir, "empty-model.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	// Set env var to use temp directory
+	oldEnv := os.Getenv("AGENT_CONFIG_DIR")
+	os.Setenv("AGENT_CONFIG_DIR", tmpDir)
+	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
+
+	// Try to load config with empty model
+	_, err := LoadAgentConfig("empty-model")
+	if err == nil {
+		t.Fatal("Expected error for empty model, got nil")
+	}
+
+	// Check error message contains expected info
+	expectedSubstr := "model field is empty"
+	if !strings.Contains(err.Error(), expectedSubstr) {
+		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
+	}
 }
 
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestLoadAgentConfig_InvalidAgentName(t *testing.T) {
+	// Try to load config with invalid agent name (path traversal attempt)
+	_, err := LoadAgentConfig("../etc/passwd")
+	if err == nil {
+		t.Fatal("Expected error for invalid agent name, got nil")
 	}
-	return false
+
+	// Check error message contains expected info
+	expectedSubstr := "invalid agent name"
+	if !strings.Contains(err.Error(), expectedSubstr) {
+		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
+	}
+}
+
+func TestLoadProductionAgentConfigs(t *testing.T) {
+	// Point to the production config directory
+	oldEnv := os.Getenv("AGENT_CONFIG_DIR")
+	os.Setenv("AGENT_CONFIG_DIR", "../../config/agents/")
+	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
+
+	agentNames := []string{
+		"branch_name",
+		"builder_resume",
+		"builder_cover_letter",
+		"pull_request",
+		"review_agent",
+		"layout_review",
+	}
+	for _, name := range agentNames {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := LoadAgentConfig(name)
+			if err != nil {
+				t.Fatalf("Failed to load config for %q: %v", name, err)
+			}
+			if cfg.Instructions == "" {
+				t.Errorf("Agent %q has empty instructions", name)
+			}
+			if cfg.Model == "" {
+				t.Errorf("Agent %q has empty model", name)
+			}
+		})
+	}
 }
 
