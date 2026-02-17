@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -20,6 +19,7 @@ import (
 	"github.com/ansg191/job-temporal/internal/webhook"
 )
 
+// Deprecated: ReviewAgentInstructions is kept for rollback safety. Use GetAgentConfig("review_agent") instead.
 const ReviewAgentInstructions = `
 You are a review agent who reviews pull requests on GitHub.
 A previous agent before you created this pull request to modify
@@ -64,6 +64,11 @@ type ReviewAgentArgs struct {
 }
 
 func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
+	agentCfg, err := loadAgentConfig(ctx, "review_agent")
+	if err != nil {
+		return err
+	}
+
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: time.Second * 30,
 	}
@@ -71,7 +76,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 
 	// Register ourselves as the review agent
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
-	err := workflow.ExecuteActivity(ctx, activities.RegisterReviewReadyPR, workflowId, args.Pr).Get(ctx, nil)
+	err = workflow.ExecuteActivity(ctx, activities.RegisterReviewReadyPR, workflowId, args.Pr).Get(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -80,7 +85,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	ch := workflow.GetSignalChannel(ctx, webhook.ReviewAgentSignal)
 
 	messages := responses.ResponseInputParam{
-		systemMessage(ReviewAgentInstructions),
+		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
 		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
 		userMessage("Branch Name: " + args.BranchName),
@@ -148,9 +153,10 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 				callAICtx,
 				activities.CallAI,
 				activities.OpenAIResponsesRequest{
-					Model:          openai.ChatModelGPT5_2,
+					Model:          agentCfg.Model,
 					Input:          pendingInput,
 					Tools:          availableReviewTools(aiTools, enableLayoutReview),
+					Temperature:    temperatureOpt(agentCfg.Temperature),
 					ConversationID: conversationID,
 				},
 			).Get(ctx, &result)

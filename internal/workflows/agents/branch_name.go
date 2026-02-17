@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -14,6 +13,7 @@ import (
 	"github.com/ansg191/job-temporal/internal/tools"
 )
 
+// Deprecated: branchNameAgentInstructions is kept for rollback safety. Use GetAgentConfig("branch_name") instead.
 const branchNameAgentInstructions = `
 You are an expert git branch namer. Your job is to create concise, descriptive,
 and standardized branch names based on a job posting description.
@@ -55,8 +55,13 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 		return "", temporal.NewNonRetryableApplicationError("invalid purpose", "InvalidPurpose", nil)
 	}
 
+	agentCfg, err := loadAgentConfig(ctx, "branch_name")
+	if err != nil {
+		return "", err
+	}
+
 	messages := responses.ResponseInputParam{
-		systemMessage(branchNameAgentInstructions),
+		systemMessage(agentCfg.Instructions),
 		userMessage("Purpose: " + string(req.Purpose)),
 		userMessage("Job Description:\n" + req.JobDescription),
 	}
@@ -79,12 +84,12 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 			callAICtx,
 			activities.CallAI,
 			activities.OpenAIResponsesRequest{
-				Model: openai.ChatModelGPT5_2,
+				Model: agentCfg.Model,
 				Input: messages,
 				Tools: []responses.ToolUnionParam{
 					tools.ListBranchesToolDesc,
 				},
-				Temperature:    openai.Float(0),
+				Temperature:    temperatureOpt(agentCfg.Temperature),
 				ConversationID: conversationID,
 			},
 		).Get(ctx, &result)
