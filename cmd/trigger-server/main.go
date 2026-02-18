@@ -15,14 +15,17 @@ import (
 	"time"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 	"go.temporal.io/sdk/client"
 
+	"github.com/ansg191/job-temporal/internal/database"
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/jobsource"
 	"github.com/ansg191/job-temporal/internal/workflows"
 )
 
-//go:embed templates/index.html static/styles.css
+//go:embed templates/*.html static/styles.css
 var uiFS embed.FS
 
 type pageData struct {
@@ -37,8 +40,25 @@ type pageData struct {
 type app struct {
 	tpl      *template.Template
 	tc       client.Client
+	db       database.Database
 	resolver *jobsource.Resolver
 	md       goldmark.Markdown
+}
+
+type jobRunView struct {
+	WorkflowID       string
+	SourceURL        string
+	CompanyName      string
+	ScrapedMarkdown  string
+	RenderedMarkdown template.HTML
+	BranchName       string
+	Status           string
+	CreatedAt        time.Time
+}
+
+type jobRunsPageData struct {
+	Runs  []jobRunView
+	Error string
 }
 
 func main() {
@@ -57,7 +77,13 @@ func main() {
 	}
 	defer tc.Close()
 
-	tpl, err := template.ParseFS(uiFS, "templates/index.html")
+	db, err := database.NewPostgresDatabase()
+	if err != nil {
+		log.Fatalln("Unable to connect to database", err)
+	}
+	defer db.Close()
+
+	tpl, err := template.ParseFS(uiFS, "templates/*.html")
 	if err != nil {
 		log.Fatalln("Unable to parse page template", err)
 	}
@@ -69,12 +95,14 @@ func main() {
 	app := &app{
 		tpl:      tpl,
 		tc:       tc,
+		db:       db,
 		resolver: jobsource.NewDefaultResolver(),
 		md:       goldmark.New(),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", app.handleForm)
+	mux.HandleFunc("/job-runs", app.handleJobRuns)
 	mux.HandleFunc("/submit", app.handleSubmit)
 	mux.HandleFunc("/health", healthHandler)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
@@ -94,6 +122,54 @@ func (a *app) handleForm(w http.ResponseWriter, r *http.Request) {
 	a.render(w, pageData{
 		Repo: "ansg191/resume",
 	})
+}
+
+func (a *app) handleJobRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	runs, err := a.db.ListJobRuns(ctx, 200)
+	if err != nil {
+		a.renderJobRuns(w, jobRunsPageData{Error: fmt.Sprintf("unable to list job runs: %v", err)})
+		return
+	}
+
+	data := jobRunsPageData{
+		Runs: make([]jobRunView, 0, len(runs)),
+	}
+	for _, run := range runs {
+		status := "UNKNOWN"
+		desc, err := a.tc.DescribeWorkflowExecution(ctx, run.WorkflowID, "")
+		if err == nil && desc != nil && desc.WorkflowExecutionInfo != nil {
+			status = desc.WorkflowExecutionInfo.GetStatus().String()
+		}
+
+		var rendered bytes.Buffer
+		if err := a.md.Convert([]byte(run.ScrapedMarkdown), &rendered); err != nil {
+			rendered.Reset()
+			rendered.WriteString("<pre>")
+			template.HTMLEscape(&rendered, []byte(run.ScrapedMarkdown))
+			rendered.WriteString("</pre>")
+		}
+
+		data.Runs = append(data.Runs, jobRunView{
+			WorkflowID:       run.WorkflowID,
+			SourceURL:        run.SourceURL,
+			CompanyName:      extractTopLevelHeader(a.md, run.ScrapedMarkdown),
+			ScrapedMarkdown:  run.ScrapedMarkdown,
+			RenderedMarkdown: template.HTML(rendered.String()),
+			BranchName:       run.BranchName,
+			Status:           status,
+			CreatedAt:        run.CreatedAt,
+		})
+	}
+
+	a.renderJobRuns(w, data)
 }
 
 func (a *app) handleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +235,14 @@ func (a *app) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) render(w http.ResponseWriter, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.tpl.Execute(w, data); err != nil {
+	if err := a.tpl.ExecuteTemplate(w, "index.html", data); err != nil {
+		http.Error(w, fmt.Sprintf("template render error: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (a *app) renderJobRuns(w http.ResponseWriter, data jobRunsPageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := a.tpl.ExecuteTemplate(w, "job_runs.html", data); err != nil {
 		http.Error(w, fmt.Sprintf("template render error: %v", err), http.StatusInternalServerError)
 	}
 }
@@ -187,4 +270,29 @@ func parseRepo(input string) (string, string, error) {
 	}
 
 	return owner, repo, nil
+}
+
+func extractTopLevelHeader(md goldmark.Markdown, markdown string) string {
+	source := []byte(markdown)
+	doc := md.Parser().Parse(text.NewReader(source))
+
+	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
+		h, ok := n.(*ast.Heading)
+		if !ok || h.Level != 1 {
+			continue
+		}
+
+		var title strings.Builder
+		for child := h.FirstChild(); child != nil; child = child.NextSibling() {
+			switch t := child.(type) {
+			case *ast.Text:
+				title.Write(t.Segment.Value(source))
+			case *ast.CodeSpan:
+				title.Write(t.Text(source))
+			}
+		}
+		return strings.TrimSpace(title.String())
+	}
+
+	return ""
 }

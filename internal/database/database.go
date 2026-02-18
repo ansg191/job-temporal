@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -25,6 +26,16 @@ type Database interface {
 	CreateJobRun(ctx context.Context, workflowID, sourceURL, scrapedMarkdown string) error
 	// UpdateJobRunBranch sets the final branch name for a job run.
 	UpdateJobRunBranch(ctx context.Context, workflowID, branchName string) error
+	// ListJobRuns returns recent job runs ordered by creation time descending.
+	ListJobRuns(ctx context.Context, limit int) ([]JobRun, error)
+}
+
+type JobRun struct {
+	WorkflowID      string
+	SourceURL       string
+	ScrapedMarkdown string
+	BranchName      string
+	CreatedAt       time.Time
 }
 
 type postgresDatabase struct {
@@ -89,6 +100,35 @@ func (p *postgresDatabase) UpdateJobRunBranch(ctx context.Context, workflowID, b
 		"UPDATE job_runs SET branch_name = $1 WHERE workflow_id = $2",
 		branchName, workflowID)
 	return err
+}
+
+func (p *postgresDatabase) ListJobRuns(ctx context.Context, limit int) ([]JobRun, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := p.db.QueryContext(ctx,
+		"SELECT workflow_id, source_url, scraped_markdown, COALESCE(branch_name, ''), created_at "+
+			"FROM job_runs ORDER BY created_at DESC LIMIT $1",
+		limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	runs := make([]JobRun, 0, limit)
+	for rows.Next() {
+		var run JobRun
+		if err := rows.Scan(&run.WorkflowID, &run.SourceURL, &run.ScrapedMarkdown, &run.BranchName, &run.CreatedAt); err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return runs, nil
 }
 
 func getDBUrl() string {

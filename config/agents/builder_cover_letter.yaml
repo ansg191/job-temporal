@@ -1,4 +1,4 @@
-model: gpt-5-2
+model: gpt-5.2
 instructions: |
   You are a cover letter builder who creates personalized cover letters for applicants that
   are specialized for specific applications.

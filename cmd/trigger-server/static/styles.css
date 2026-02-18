@@ -42,6 +42,28 @@ body {
   box-shadow: 0 12px 30px rgba(15, 36, 62, 0.08);
 }
 
+.top-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.35rem;
+}
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 700;
+  background: #f4f8ff;
+}
+
+.link-btn:hover {
+  border-color: var(--accent);
+}
+
 h1,
 h2 {
   margin: 0 0 0.75rem;
@@ -127,6 +149,45 @@ button:active {
   background: var(--success-bg);
   color: var(--success-text);
   border-color: #bce9cb;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.runs-table th,
+.runs-table td {
+  border: 1px solid var(--line);
+  padding: 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.runs-table th {
+  background: #f1f6ff;
+}
+
+.status-pill {
+  display: inline-block;
+  border: 1px solid #c9d8f4;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #294978;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9rem;
 }
 
 pre {

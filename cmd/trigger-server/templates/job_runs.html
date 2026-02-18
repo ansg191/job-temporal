@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Runs</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="container">
+    <section class="panel">
+      <div class="top-actions">
+        <a class="link-btn" href="/">Back To Trigger</a>
+      </div>
+      <h1>Job Runs</h1>
+      <p class="subtitle">Recent job workflow runs from the database.</p>
+
+      {{if .Error}}
+      <div class="notice error">{{.Error}}</div>
+      {{end}}
+
+      {{if .Runs}}
+      <div class="table-wrap">
+        <table class="runs-table">
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Workflow ID</th>
+              <th>Company</th>
+              <th>Branch</th>
+              <th>Job App URL</th>
+              <th>Status</th>
+              <th>Markdown</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Runs}}
+            <tr>
+              <td>{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}}</td>
+              <td class="mono">{{.WorkflowID}}</td>
+              <td>{{if .CompanyName}}{{.CompanyName}}{{else}}-{{end}}</td>
+              <td class="mono">{{if .BranchName}}{{.BranchName}}{{else}}-{{end}}</td>
+              <td><a href="{{.SourceURL}}" target="_blank" rel="noreferrer noopener">Open Link</a></td>
+              <td><span class="status-pill">{{.Status}}</span></td>
+              <td>
+                <details>
+                  <summary>View</summary>
+                  <article class="markdown-output">{{.RenderedMarkdown}}</article>
+                </details>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="notice">No job runs found.</div>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>
