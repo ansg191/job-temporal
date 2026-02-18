@@ -1,4 +1,23 @@
 services:
+  traefik:
+    image: traefik:v3.2
+    container_name: job-temporal-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.constraints=Label(`com.docker.compose.project`,`job-temporal`)
+      - --entrypoints.web.address=:80
+    ports:
+      - "8080:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      server:
+        condition: service_started
+      trigger-server:
+        condition: service_started
+
   postgres:
     image: postgres:18
     container_name: job-temporal-postgres
@@ -77,8 +96,35 @@ services:
       DATABASE_URL: postgres://job-temporal:job-temporal@postgres:5432/job-temporal?sslmode=disable
       TEMPORAL_ADDRESS: temporal:7233
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-dev-secret}
-    ports:
-      - "8080:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=job-temporal_default
+      - traefik.http.routers.job-temporal-server-webhook.rule=PathPrefix(`/webhook`)
+      - traefik.http.routers.job-temporal-server-webhook.entrypoints=web
+      - traefik.http.routers.job-temporal-server-webhook.priority=100
+      - traefik.http.services.job-temporal-server.loadbalancer.server.port=8080
+
+  trigger-server:
+    build:
+      context: .
+      dockerfile: trigger-server.Dockerfile
+    container_name: job-temporal-trigger-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://job-temporal:job-temporal@postgres:5432/job-temporal?sslmode=disable
+      TEMPORAL_ADDRESS: temporal:7233
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=job-temporal_default
+      - traefik.http.routers.job-temporal-trigger.rule=PathPrefix(`/`)
+      - traefik.http.routers.job-temporal-trigger.entrypoints=web
+      - traefik.http.routers.job-temporal-trigger.priority=1
+      - traefik.http.services.job-temporal-trigger.loadbalancer.server.port=8090
 
   worker:
     build:
