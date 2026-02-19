@@ -10,7 +10,7 @@ import (
 func TestLoadAgentConfig_ValidFile(t *testing.T) {
 	// Create temp directory
 	tmpDir := t.TempDir()
-	
+
 	// Create a valid YAML config file
 	configContent := `instructions: "Test instructions for agent"
 model: "gpt-4"
@@ -205,4 +205,3 @@ func TestLoadProductionAgentConfigs(t *testing.T) {
 		})
 	}
 }
-

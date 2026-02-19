@@ -79,7 +79,7 @@ var EditFileToolDesc = responses.ToolUnionParam{
 					"description": "The path to the file to edit",
 				},
 				"patch": map[string]string{
-					"type":        "string",
+					"type": "string",
 					"description": `A unified diff patch in git diff format. Structure:
 1. File headers: '--- a/file' and '+++ b/file'
 2. Hunk header: '@@ -OLD_START,OLD_COUNT +NEW_START,NEW_COUNT @@' where OLD_COUNT is the exact number of lines starting with ' ' or '-', and NEW_COUNT is the exact number of lines starting with ' ' or '+'.
