@@ -1,0 +1,27 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: server
+            dockerfile: server.Dockerfile
+          - image: trigger-server
+            dockerfile: trigger-server.Dockerfile
+          - image: worker
+            dockerfile: worker.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f ${{ matrix.dockerfile }} .
