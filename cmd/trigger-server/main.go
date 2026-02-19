@@ -288,7 +288,11 @@ func extractTopLevelHeader(md goldmark.Markdown, markdown string) string {
 			case *ast.Text:
 				title.Write(t.Segment.Value(source))
 			case *ast.CodeSpan:
-				title.Write(t.Text(source))
+				for c := t.FirstChild(); c != nil; c = c.NextSibling() {
+					if textNode, ok := c.(*ast.Text); ok {
+						title.Write(textNode.Segment.Value(source))
+					}
+				}
 			}
 		}
 		return strings.TrimSpace(title.String())
