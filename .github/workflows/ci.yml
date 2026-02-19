@@ -18,7 +18,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./...
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage.out ./...
+      - name: Report coverage
+        run: go tool cover -func=coverage.out
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
 
   fmt:
     name: Format
