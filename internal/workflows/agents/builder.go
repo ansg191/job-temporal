@@ -209,12 +209,6 @@ var buildTargetAgentName = map[BuildTarget]string{
 	BuildTargetCoverLetter: "builder_cover_letter",
 }
 
-// Deprecated: buildTargetMap is kept for rollback safety. Use GetAgentConfig with buildTargetAgentName instead.
-var buildTargetMap = map[BuildTarget]string{
-	BuildTargetResume:      ResumeBuilderInstructions,
-	BuildTargetCoverLetter: CoverLetterBuilderInstructions,
-}
-
 // Deprecated: ResumeBuilderInstructions is kept for rollback safety. Use GetAgentConfig("builder_resume") instead.
 const ResumeBuilderInstructions = `
 You are a resume builder who creates personalized resumes for applicants that

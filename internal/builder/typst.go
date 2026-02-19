@@ -52,9 +52,9 @@ func WithTypstPPI(ppi int) func(Builder) {
 
 func WithPageLimit(limit int) func(Builder) {
 	return func(b Builder) {
-		switch b.(type) {
+		switch b := b.(type) {
 		case *typstBuilder:
-			b.(*typstBuilder).pageLimit = limit
+			b.pageLimit = limit
 		}
 	}
 }
