@@ -41,7 +41,8 @@ func TestFileStrategyFetch(t *testing.T) {
 		t.Fatalf("parse URL: %v", err)
 	}
 
-	got, err := NewFileStrategy().Fetch(context.Background(), u)
+	s := &FileStrategy{baseDir: dir}
+	got, err := s.Fetch(context.Background(), u)
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -49,6 +50,28 @@ func TestFileStrategyFetch(t *testing.T) {
 	want := strings.TrimSpace(content)
 	if got != want {
 		t.Fatalf("Fetch = %q, want %q", got, want)
+	}
+}
+
+func TestFileStrategyFetchOutsideBaseDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outsideFile := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	rawURL := "file://" + filepath.ToSlash(outsideFile)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse URL: %v", err)
+	}
+
+	s := &FileStrategy{baseDir: dir}
+	_, err = s.Fetch(context.Background(), u)
+	if err == nil {
+		t.Fatalf("expected error for path outside base dir")
 	}
 }
 

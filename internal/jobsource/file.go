@@ -70,16 +70,18 @@ func (s *FileStrategy) Fetch(_ context.Context, u *url.URL) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("invalid file path %q: %w", path, err)
+	}
 	absPath = filepath.Clean(absPath)
+
 	// Enforce that absPath is inside s.baseDir.
 	base := s.baseDir
 	// Ensure base has a trailing separator when doing prefix comparison.
 	if !strings.HasSuffix(base, string(os.PathSeparator)) {
-		base = base + string(os.PathSeparator)
+		base += string(os.PathSeparator)
 	}
 	pathWithSep := absPath
 	if !strings.HasSuffix(pathWithSep, string(os.PathSeparator)) {
-		pathWithSep = pathWithSep + string(os.PathSeparator)
+		pathWithSep += string(os.PathSeparator)
 	}
 	if !strings.HasPrefix(pathWithSep, base) {
 		return "", fmt.Errorf("file URL path %q is outside the allowed directory", absPath)
@@ -88,8 +90,6 @@ func (s *FileStrategy) Fetch(_ context.Context, u *url.URL) (string, error) {
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", absPath, err)
-	}
-
 	}
 
 	return strings.TrimSpace(string(data)), nil
