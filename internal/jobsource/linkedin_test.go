@@ -73,6 +73,14 @@ func TestParseLinkedInDescription(t *testing.T) {
 
 	html := `
 <html><body>
+	<h1 class="topcard__title">Software Engineer</h1>
+	<a class="topcard__org-name-link">Acme Corp</a>
+	<ul class="description__job-criteria-list">
+		<li class="description__job-criteria-item">
+			<h3 class="description__job-criteria-subheader">Seniority level</h3>
+			<span class="description__job-criteria-text">Entry level</span>
+		</li>
+	</ul>
 	<div class="description__text description__text--rich">
 		<section class="show-more-less-html">
 			<div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5">
@@ -92,6 +100,9 @@ func TestParseLinkedInDescription(t *testing.T) {
 	}
 
 	wantContains := []string{
+		"# Acme Corp",
+		"## Software Engineer",
+		"**Seniority level**: Entry level",
 		"Build backend services in Go.",
 		"- Own APIs",
 		"- Work with product teams",
@@ -113,6 +124,14 @@ func TestLinkedInFetch(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `
 <html><body>
+	<h1 class="topcard__title">Software Engineer</h1>
+	<a class="topcard__org-name-link">Test Corp</a>
+	<ul class="description__job-criteria-list">
+		<li class="description__job-criteria-item">
+			<h3 class="description__job-criteria-subheader">Seniority level</h3>
+			<span class="description__job-criteria-text">Entry level</span>
+		</li>
+	</ul>
 	<div class="show-more-less-html__markup">
 		<p>Test description from LinkedIn guest endpoint.</p>
 	</div>
