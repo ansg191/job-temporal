@@ -44,7 +44,7 @@ func createBareRemote(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(bareDir) })
 
-	cmd := exec.Command("git", "init", "--bare", bareDir)
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", bareDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare failed: %v\n%s", err, out)
 	}
@@ -90,6 +90,10 @@ func newRepoFixture(t *testing.T) (*Repository, string, string) {
 	if err != nil {
 		t.Fatalf("NewGitRepo failed: %v", err)
 	}
+
+	// Configure git user for commits (runGit disables global/system config).
+	runGit(t, repo.path, "config", "user.email", "test@test.com")
+	runGit(t, repo.path, "config", "user.name", "Test User")
 
 	// Create unique branch and commit so tests have deterministic state.
 	branchName := fmt.Sprintf("test/%d", time.Now().UnixNano())

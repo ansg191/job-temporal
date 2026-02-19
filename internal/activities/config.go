@@ -10,4 +10,3 @@ import (
 func GetAgentConfig(ctx context.Context, agentName string) (*config.AgentConfig, error) {
 	return config.LoadAgentConfig(agentName)
 }
-
