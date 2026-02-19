@@ -2,10 +2,10 @@ package jobsource
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -114,35 +114,52 @@ func TestParseLinkedInDescription(t *testing.T) {
 	}
 }
 
+func TestParseLinkedInDescriptionFromFile(t *testing.T) {
+	t.Parallel()
+
+	f, err := os.Open("testdata/linkedin_4362930940.html")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	got, err := parseLinkedInDescription(f)
+	if err != nil {
+		t.Fatalf("parseLinkedInDescription returned error: %v", err)
+	}
+
+	wantContains := []string{
+		"# Cyngn",
+		"## Full Stack Software Engineer",
+		"**Seniority level**: Entry level",
+		"**Employment type**: Full-time",
+		"**Job function**: Engineering and Information Technology",
+		"**Industries**: Automation Machinery Manufacturing",
+		"About Cyngn",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Fatalf("description missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestLinkedInFetch(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/jobs-guest/jobs/api/jobPosting/123456" {
+		if r.URL.Path != "/jobs-guest/jobs/api/jobPosting/4362930940" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		_, _ = io.WriteString(w, `
-<html><body>
-	<h1 class="topcard__title">Software Engineer</h1>
-	<a class="topcard__org-name-link">Test Corp</a>
-	<ul class="description__job-criteria-list">
-		<li class="description__job-criteria-item">
-			<h3 class="description__job-criteria-subheader">Seniority level</h3>
-			<span class="description__job-criteria-text">Entry level</span>
-		</li>
-	</ul>
-	<div class="show-more-less-html__markup">
-		<p>Test description from LinkedIn guest endpoint.</p>
-	</div>
-</body></html>`)
+		http.ServeFile(w, r, "testdata/linkedin_4362930940.html")
 	}))
 	defer server.Close()
 
 	strategy := NewLinkedInStrategy(server.Client())
 	strategy.endpointFormat = server.URL + "/jobs-guest/jobs/api/jobPosting/%s"
 
-	u, err := url.Parse("https://www.linkedin.com/jobs/view/software-engineer-123456")
+	u, err := url.Parse("https://www.linkedin.com/jobs/view/full-stack-software-engineer-at-cyngn-4362930940")
 	if err != nil {
 		t.Fatalf("parse URL: %v", err)
 	}
@@ -151,7 +168,14 @@ func TestLinkedInFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
-	if !strings.Contains(desc, "Test description from LinkedIn guest endpoint.") {
-		t.Fatalf("unexpected description: %q", desc)
+	wantContains := []string{
+		"# Cyngn",
+		"## Full Stack Software Engineer",
+		"About Cyngn",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q in:\n%s", want, desc)
+		}
 	}
 }
