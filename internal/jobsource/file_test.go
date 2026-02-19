@@ -88,3 +88,60 @@ func TestFileStrategyFetchUnsupportedHost(t *testing.T) {
 		t.Fatalf("expected error for unsupported host")
 	}
 }
+
+// TestFileStrategyFetchPathTraversal verifies that the path-traversal
+// protections in Fetch block all common attack vectors.
+func TestFileStrategyFetchPathTraversal(t *testing.T) {
+	t.Parallel()
+
+	// safeDir is the only directory that should be accessible.
+	safeDir := t.TempDir()
+	// outsideDir is a sibling directory that must not be reachable.
+	outsideDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	s := &FileStrategy{baseDir: safeDir}
+
+	tests := []struct {
+		name string
+		// rawURL is built as a string so we can include raw %-escapes.
+		rawURL string
+	}{
+		{
+			name:   "absolute path to /etc/passwd",
+			rawURL: "file:///etc/passwd",
+		},
+		{
+			name:   "dot-dot traversal to sibling dir",
+			rawURL: "file://" + filepath.ToSlash(filepath.Join(safeDir, "..", filepath.Base(outsideDir), "secret.txt")),
+		},
+		{
+			name: "URL-encoded dot-dot traversal",
+			rawURL: "file://" + filepath.ToSlash(safeDir) + "/%2e%2e/" +
+				filepath.Base(outsideDir) + "/secret.txt",
+		},
+		{
+			name:   "same-prefix sibling directory",
+			rawURL: "file://" + filepath.ToSlash(filepath.Join(outsideDir, "secret.txt")),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			u, err := url.Parse(tc.rawURL)
+			if err != nil {
+				t.Fatalf("parse URL %q: %v", tc.rawURL, err)
+			}
+
+			_, err = s.Fetch(context.Background(), u)
+			if err == nil {
+				t.Fatalf("Fetch(%q) succeeded; expected an error blocking path traversal", tc.rawURL)
+			}
+		})
+	}
+}
