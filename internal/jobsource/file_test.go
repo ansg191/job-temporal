@@ -99,8 +99,24 @@ func TestFileStrategyFetchPathTraversal(t *testing.T) {
 	// outsideDir is a sibling directory that must not be reachable.
 	outsideDir := t.TempDir()
 
-	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret"), 0o644); err != nil {
-		t.Fatalf("write outside file: %v", err)
+	// siblingDir has the same string prefix as safeDir (e.g. /tmp/TestXxx/001-evil
+	// when safeDir is /tmp/TestXxx/001) to exercise the trailing-separator guard.
+	siblingDir := safeDir + "-evil"
+	if err := os.MkdirAll(siblingDir, 0o755); err != nil {
+		t.Fatalf("create sibling dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(siblingDir) })
+
+	for _, dir := range []string{outsideDir, siblingDir} {
+		if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o644); err != nil {
+			t.Fatalf("write secret file: %v", err)
+		}
+	}
+
+	// symlinkPath is inside safeDir but points to a file in outsideDir.
+	symlinkPath := filepath.Join(safeDir, "link.txt")
+	if err := os.Symlink(filepath.Join(outsideDir, "secret.txt"), symlinkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
 	}
 
 	s := &FileStrategy{baseDir: safeDir}
@@ -125,7 +141,11 @@ func TestFileStrategyFetchPathTraversal(t *testing.T) {
 		},
 		{
 			name:   "same-prefix sibling directory",
-			rawURL: "file://" + filepath.ToSlash(filepath.Join(outsideDir, "secret.txt")),
+			rawURL: "file://" + filepath.ToSlash(filepath.Join(siblingDir, "secret.txt")),
+		},
+		{
+			name:   "symlink inside base dir pointing outside",
+			rawURL: "file://" + filepath.ToSlash(symlinkPath),
 		},
 	}
 
@@ -143,5 +163,26 @@ func TestFileStrategyFetchPathTraversal(t *testing.T) {
 				t.Fatalf("Fetch(%q) succeeded; expected an error blocking path traversal", tc.rawURL)
 			}
 		})
+	}
+}
+
+func TestFileStrategyFetchEmptyBaseDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "job.txt")
+	if err := os.WriteFile(filePath, []byte("content"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	u, err := url.Parse("file://" + filepath.ToSlash(filePath))
+	if err != nil {
+		t.Fatalf("parse URL: %v", err)
+	}
+
+	s := &FileStrategy{} // zero value: baseDir is empty
+	_, err = s.Fetch(context.Background(), u)
+	if err == nil {
+		t.Fatalf("expected error for empty baseDir")
 	}
 }
