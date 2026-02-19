@@ -10,6 +10,7 @@ import (
 
 const SignalName = "github-webhook"
 const ReviewAgentSignal = "review-agent-signal"
+const RebuildSignal = "rebuild-signal"
 
 type WebhookSignal struct {
 	Type        string // "pull_request_review", "issue_comment", "pull_request_review_comment"
@@ -31,24 +32,27 @@ type WebhookSignal struct {
 	DiffHunk  string // Diff context around the comment
 }
 
-// WorkflowIDResolver resolves the workflow ID for a given PR.
+// WorkflowIDResolver resolves the workflow ID for a given webhook signal.
 type WorkflowIDResolver interface {
-	Resolve(ctx context.Context, owner, repo string, prNumber int) (string, error)
+	Resolve(ctx context.Context, signal *WebhookSignal) (string, error)
 }
 
 // PRBasedResolver is a placeholder implementation that generates workflow IDs based on PR info.
-// TODO: Replace with PostgresResolver that queries workflow_id from PR number.
 type PRBasedResolver struct{}
 
-func (r *PRBasedResolver) Resolve(ctx context.Context, owner, repo string, prNumber int) (string, error) {
-	return fmt.Sprintf("pr-%s-%s-%d", owner, repo, prNumber), nil
+func (r *PRBasedResolver) Resolve(_ context.Context, signal *WebhookSignal) (string, error) {
+	return fmt.Sprintf("pr-%s-%s-%d", signal.Owner, signal.Repo, signal.PRNumber), nil
 }
 
 type PostgresResolver struct {
 	db database.Database
 }
 
-func (p *PostgresResolver) Resolve(ctx context.Context, owner, repo string, prNumber int) (string, error) {
-	_, _ = repo, owner
-	return p.db.GetPrWorkflowId(ctx, prNumber)
+func (p *PostgresResolver) Resolve(ctx context.Context, signal *WebhookSignal) (string, error) {
+	switch signal.Type {
+	case "push":
+		return p.db.GetBranchWorkflowId(ctx, signal.Owner, signal.Repo, signal.PRBranch)
+	default:
+		return p.db.GetPrWorkflowId(ctx, signal.Owner, signal.Repo, signal.PRNumber)
+	}
 }

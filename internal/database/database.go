@@ -16,12 +16,15 @@ var ErrNotFound = errors.New("not found")
 type Database interface {
 	io.Closer
 	// RegisterReviewReadyPR links a pull request to a workflow, marking it as ready for review in the system.
-	RegisterReviewReadyPR(ctx context.Context, workflowId string, prNumber int) error
+	RegisterReviewReadyPR(ctx context.Context, workflowID, owner, repo, branchName string, prNumber int) error
 	// GetPrWorkflowId returns the workflow ID for a given pull request number.
 	// Will return ErrNotFound if the PR is not registered or PR is already finished.
-	GetPrWorkflowId(ctx context.Context, prNumber int) (string, error)
-	// FinishPR marks a pull request as finished in the system.
-	FinishPR(ctx context.Context, prNumber int) error
+	GetPrWorkflowId(ctx context.Context, owner, repo string, prNumber int) (string, error)
+	// GetBranchWorkflowId returns the workflow ID for a given branch.
+	// Will return ErrNotFound if the branch is not registered or is already finished.
+	GetBranchWorkflowId(ctx context.Context, owner, repo, branchName string) (string, error)
+	// FinishReviewWorkflow marks a review workflow as finished in the system.
+	FinishReviewWorkflow(ctx context.Context, workflowID string) error
 	// CreateJobRun inserts a new job run record.
 	CreateJobRun(ctx context.Context, workflowID, sourceURL, scrapedMarkdown string) error
 	// UpdateJobRunBranch sets the final branch name for a job run.
@@ -59,18 +62,38 @@ func NewPostgresDatabase() (Database, error) {
 	return &postgresDatabase{db: db}, nil
 }
 
-func (p *postgresDatabase) RegisterReviewReadyPR(ctx context.Context, workflowId string, prNumber int) error {
+func (p *postgresDatabase) RegisterReviewReadyPR(ctx context.Context, workflowID, owner, repo, branchName string, prNumber int) error {
 	_, err := p.db.ExecContext(ctx,
-		"INSERT INTO workflows (workflow_id, pull_request_id, finished) VALUES ($1, $2, false)",
-		workflowId, prNumber)
+		`INSERT INTO workflows (workflow_id, owner, repo, branch_name, pull_request_id, finished)
+VALUES ($1, $2, $3, $4, $5, false)
+ON CONFLICT (workflow_id) DO UPDATE SET
+	owner = EXCLUDED.owner,
+	repo = EXCLUDED.repo,
+	branch_name = EXCLUDED.branch_name,
+	pull_request_id = EXCLUDED.pull_request_id,
+	finished = false`,
+		workflowID, owner, repo, branchName, prNumber)
 	return err
 }
 
-func (p *postgresDatabase) GetPrWorkflowId(ctx context.Context, prNumber int) (string, error) {
+func (p *postgresDatabase) GetPrWorkflowId(ctx context.Context, owner, repo string, prNumber int) (string, error) {
 	var workflowId string
 	err := p.db.QueryRowContext(ctx,
-		"SELECT workflow_id FROM workflows WHERE pull_request_id = $1 AND finished = false",
-		prNumber).Scan(&workflowId)
+		`SELECT workflow_id
+FROM workflows
+WHERE pull_request_id = $3
+  AND finished = false
+  AND (
+    (owner = $1 AND repo = $2)
+    OR (owner = '' AND repo = '')
+  )
+ORDER BY
+  CASE
+    WHEN owner = $1 AND repo = $2 THEN 0
+    ELSE 1
+  END
+LIMIT 1;`,
+		owner, repo, prNumber).Scan(&workflowId)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -80,10 +103,24 @@ func (p *postgresDatabase) GetPrWorkflowId(ctx context.Context, prNumber int) (s
 	return workflowId, nil
 }
 
-func (p *postgresDatabase) FinishPR(ctx context.Context, prNumber int) error {
+func (p *postgresDatabase) GetBranchWorkflowId(ctx context.Context, owner, repo, branchName string) (string, error) {
+	var workflowId string
+	err := p.db.QueryRowContext(ctx,
+		"SELECT workflow_id FROM workflows WHERE owner = $1 AND repo = $2 AND branch_name = $3 AND finished = false",
+		owner, repo, branchName).Scan(&workflowId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return workflowId, nil
+}
+
+func (p *postgresDatabase) FinishReviewWorkflow(ctx context.Context, workflowID string) error {
 	_, err := p.db.ExecContext(ctx,
-		"UPDATE workflows SET finished = true WHERE pull_request_id = $1",
-		prNumber)
+		"UPDATE workflows SET finished = true WHERE workflow_id = $1",
+		workflowID)
 	return err
 }
 

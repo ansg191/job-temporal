@@ -6,24 +6,24 @@ import (
 	"github.com/ansg191/job-temporal/internal/database"
 )
 
-func RegisterReviewReadyPR(ctx context.Context, id string, pr int) error {
+func RegisterReviewReadyPR(ctx context.Context, id, owner, repo, branch string, pr int) error {
 	db, err := database.NewPostgresDatabase()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	return db.RegisterReviewReadyPR(ctx, id, pr)
+	return db.RegisterReviewReadyPR(ctx, id, owner, repo, branch, pr)
 }
 
-func FinishReview(ctx context.Context, pr int) error {
+func FinishReview(ctx context.Context, workflowID string) error {
 	db, err := database.NewPostgresDatabase()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	return db.FinishPR(ctx, pr)
+	return db.FinishReviewWorkflow(ctx, workflowID)
 }
 
 type CreateJobRunRequest struct {

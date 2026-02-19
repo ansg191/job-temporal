@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/config"
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/tools"
 	"github.com/ansg191/job-temporal/internal/webhook"
@@ -56,6 +57,8 @@ AVAILABLE TOOLS:
 - review_pdf_layout(): Render built pages and return structured visual layout defects with fix hints (resume only).
 `
 
+const reviewBotLogin = "job-temporal[bot]"
+
 type ReviewAgentArgs struct {
 	Repo        github.ClientOptions `json:"repo"`
 	Pr          int                  `json:"pr"`
@@ -75,145 +78,193 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	// Register ourselves as the review agent
-	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
-	err = workflow.ExecuteActivity(ctx, activities.RegisterReviewReadyPR, workflowId, args.Pr).Get(ctx, nil)
+	workflowID := workflow.GetInfo(ctx).WorkflowExecution.ID
+	err = workflow.ExecuteActivity(
+		ctx,
+		activities.RegisterReviewReadyPR,
+		workflowID,
+		args.Repo.Owner,
+		args.Repo.Repo,
+		args.BranchName,
+		args.Pr,
+	).Get(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	// Get signal channel
-	ch := workflow.GetSignalChannel(ctx, webhook.ReviewAgentSignal)
-
-	messages := responses.ResponseInputParam{
-		systemMessage(agentCfg.Instructions),
-		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
-		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
-		userMessage("Branch Name: " + args.BranchName),
-	}
+	reviewCh := workflow.GetSignalChannel(ctx, webhook.ReviewAgentSignal)
+	rebuildCh := workflow.GetSignalChannel(ctx, webhook.RebuildSignal)
 
 	var aiTools []responses.ToolUnionParam
 	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return err
 	}
-	conversationID, err := createConversation(ctx, nil)
+
+	conversationID, err := createConversation(ctx, responses.ResponseInputParam{
+		systemMessage(agentCfg.Instructions),
+		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
+		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
+		userMessage("Branch Name: " + args.BranchName),
+	})
 	if err != nil {
 		return err
 	}
-	callAICtx := withCallAIActivityOptions(ctx)
-	initialized := false
 	buildRun := 0
 	enableLayoutReview := args.BuildTarget == BuildTargetResume
+	reviewProcessor := reviewSignalProcessor{
+		args:               &args,
+		agentCfg:           agentCfg,
+		aiTools:            aiTools,
+		conversationID:     conversationID,
+		enableLayoutReview: enableLayoutReview,
+		buildRun:           &buildRun,
+	}
 
 	for {
-		// Wait for signal
-		var signal *webhook.WebhookSignal
-		ch.Receive(ctx, &signal)
+		var (
+			reviewSignal   *webhook.WebhookSignal
+			rebuildSignal  *webhook.WebhookSignal
+			receivedReview bool
+		)
+		selector := workflow.NewSelector(ctx)
+		selector.AddReceive(reviewCh, func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &reviewSignal)
+			receivedReview = true
+		})
+		selector.AddReceive(rebuildCh, func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &rebuildSignal)
+		})
+		selector.Select(ctx)
 
-		if signal == nil {
-			continue
-		}
-		// If signal is PR closed, then we are done
-		if signal.Type == "pull_request" && signal.Action == "closed" {
-			break
-		}
-		// Ignore signals from ourselves
-		if signal.AuthorLogin == "job-temporal[bot]" {
-			continue
-		}
-		// Ignore signals with empty bodies
-		if signal.Body == "" {
-			continue
-		}
-
-		signalBytes, err := json.Marshal(signal)
-		if err != nil {
-			return err
-		}
-		workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
-		pendingInput := responses.ResponseInputParam{
-			userMessage("User Review: " + string(signalBytes)),
-		}
-		if !initialized {
-			pendingInput = append(messages, pendingInput...)
-			initialized = true
-		}
-
-		dispatcher := &reviewAgentDispatcher{
-			aiTools:     aiTools,
-			ghOpts:      args.Repo,
-			branchName:  args.BranchName,
-			buildTarget: args.BuildTarget,
-		}
-
-		var pdfUrl string
-		for {
-			var result *responses.Response
-			err = workflow.ExecuteActivity(
-				callAICtx,
-				activities.CallAI,
-				activities.OpenAIResponsesRequest{
-					Model:          agentCfg.Model,
-					Input:          pendingInput,
-					Tools:          availableReviewTools(aiTools, enableLayoutReview),
-					Temperature:    temperatureOpt(agentCfg.Temperature),
-					ConversationID: conversationID,
-				},
-			).Get(ctx, &result)
+		if receivedReview {
+			shouldFinish, err := reviewProcessor.process(ctx, reviewSignal)
 			if err != nil {
 				return err
 			}
-
-			if !hasFunctionCalls(result.Output) {
-				// Finished with agent loop, rebuild the PDF
-				buildRun++
-				err = workflow.ExecuteChildWorkflow(
-					workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-						WorkflowID: MakeChildWorkflowID(
-							ctx,
-							"build-upload-pdf",
-							args.BranchName,
-							strconv.Itoa(args.Pr),
-							strconv.Itoa(buildRun),
-						),
-					}),
-					BuildAndUploadPDFWorkflow,
-					BuildAndUploadPDFWorkflowRequest{
-						ClientOptions: args.Repo,
-						Branch:        args.BranchName,
-						Builder:       "typst", // TODO: remove this hardcoded builder
-						BuildTarget:   args.BuildTarget,
-					},
-				).Get(ctx, &pdfUrl)
-				if err != nil {
-					var appErr *temporal.ApplicationError
-					if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
-						// Build failed, so kick back to Ai to fix
-						var details []string
-						_ = appErr.Details(&details)
-						pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
-							"Build failed, fix and try again: \n%s",
-							strings.Join(details, "\n"),
-						))}
-						continue
-					}
-					return err
-				}
+			if shouldFinish {
 				break
 			}
-
-			pendingInput = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+			continue
 		}
 
-		// Update URL in PR description
-		err = updatePRDescription(ctx, args.Repo, args.Pr, pdfUrl)
+		if rebuildSignal == nil {
+			continue
+		}
+		// Ignore pushes from ourselves.
+		if rebuildSignal.AuthorLogin == reviewBotLogin {
+			continue
+		}
+
+		buildRun++
+		pdfURL, err := runBuildAndUploadForReview(ctx, args, buildRun)
 		if err != nil {
+			reason := buildFailureReason(err)
+			workflow.GetLogger(ctx).Warn("Push rebuild failed", "reason", reason)
+			if err = updatePRDescriptionFailure(ctx, args.Repo, args.Pr, reason); err != nil {
+				return err
+			}
+			continue
+		}
+		if err = updatePRDescriptionSuccess(ctx, args.Repo, args.Pr, pdfURL); err != nil {
 			return err
 		}
 	}
 
 	// Mark PR as finished
-	return workflow.ExecuteActivity(ctx, activities.FinishReview, args.Pr).Get(ctx, nil)
+	return workflow.ExecuteActivity(ctx, activities.FinishReview, workflowID).Get(ctx, nil)
+}
+
+type reviewSignalProcessor struct {
+	args               *ReviewAgentArgs
+	agentCfg           *config.AgentConfig
+	aiTools            []responses.ToolUnionParam
+	conversationID     string
+	enableLayoutReview bool
+	buildRun           *int
+}
+
+func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webhook.WebhookSignal) (bool, error) {
+	if reviewSignal == nil {
+		return false, nil
+	}
+	// If signal is PR closed, then we are done.
+	if reviewSignal.Type == "pull_request" && reviewSignal.Action == "closed" {
+		return true, nil
+	}
+	// Ignore signals from ourselves.
+	if reviewSignal.AuthorLogin == reviewBotLogin {
+		return false, nil
+	}
+	// Ignore signals with empty bodies.
+	if reviewSignal.Body == "" {
+		return false, nil
+	}
+
+	signalBytes, err := json.Marshal(reviewSignal)
+	if err != nil {
+		return false, err
+	}
+	workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
+	pendingInput := responses.ResponseInputParam{
+		userMessage("User Review: " + string(signalBytes)),
+	}
+	callAICtx := withCallAIActivityOptions(ctx)
+	dispatcher := &reviewAgentDispatcher{
+		aiTools:     p.aiTools,
+		ghOpts:      p.args.Repo,
+		branchName:  p.args.BranchName,
+		buildTarget: p.args.BuildTarget,
+	}
+
+	var pdfURL string
+	for {
+		var result *responses.Response
+		err = workflow.ExecuteActivity(
+			callAICtx,
+			activities.CallAI,
+			activities.OpenAIResponsesRequest{
+				Model:          p.agentCfg.Model,
+				Input:          pendingInput,
+				Tools:          availableReviewTools(p.aiTools, p.enableLayoutReview),
+				Temperature:    temperatureOpt(p.agentCfg.Temperature),
+				ConversationID: p.conversationID,
+			},
+		).Get(ctx, &result)
+		if err != nil {
+			return false, err
+		}
+
+		if !hasFunctionCalls(result.Output) {
+			// Finished with agent loop, rebuild the PDF.
+			*p.buildRun++
+			pdfURL, err = runBuildAndUploadForReview(ctx, *p.args, *p.buildRun)
+			if err != nil {
+				var appErr *temporal.ApplicationError
+				if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
+					// Build failed, so kick back to AI to fix.
+					var details []string
+					_ = appErr.Details(&details)
+					pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
+						"Build failed, fix and try again: \n%s",
+						strings.Join(details, "\n"),
+					))}
+					continue
+				}
+				return false, err
+			}
+			break
+		}
+
+		pendingInput = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+	}
+
+	// Update URL in PR description.
+	if err = updatePRDescriptionSuccess(ctx, p.args.Repo, p.args.Pr, pdfURL); err != nil {
+		return false, err
+	}
+
+	return false, nil
 }
 
 type reviewAgentDispatcher struct {
@@ -288,7 +339,35 @@ func availableReviewTools(aiTools []responses.ToolUnionParam, enableLayoutReview
 	return ret
 }
 
-func updatePRDescription(ctx workflow.Context, repo github.ClientOptions, pr int, url string) error {
+const prArtifactErrorLinePrefix = "PDF Artifact Error:"
+
+func runBuildAndUploadForReview(ctx workflow.Context, args ReviewAgentArgs, buildRun int) (string, error) {
+	var pdfURL string
+	err := workflow.ExecuteChildWorkflow(
+		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID: MakeChildWorkflowID(
+				ctx,
+				"build-upload-pdf",
+				args.BranchName,
+				strconv.Itoa(args.Pr),
+				strconv.Itoa(buildRun),
+			),
+		}),
+		BuildAndUploadPDFWorkflow,
+		BuildAndUploadPDFWorkflowRequest{
+			ClientOptions: args.Repo,
+			Branch:        args.BranchName,
+			Builder:       "typst", // TODO: remove this hardcoded builder
+			BuildTarget:   args.BuildTarget,
+		},
+	).Get(ctx, &pdfURL)
+	if err != nil {
+		return "", err
+	}
+	return pdfURL, nil
+}
+
+func updatePRDescriptionSuccess(ctx workflow.Context, repo github.ClientOptions, pr int, url string) error {
 	// Get existing PR description
 	var body string
 	err := workflow.ExecuteActivity(
@@ -303,31 +382,16 @@ func updatePRDescription(ctx workflow.Context, repo github.ClientOptions, pr int
 		return err
 	}
 
-	// Find existing PDF URL via prefix
-	var oldUrl string
-	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prArtifactLinePrefix) {
-			oldUrl = strings.TrimSpace(line[len(prArtifactLinePrefix):])
-			lines[i] = prArtifactLinePrefix + " " + url
-			break
+	body, oldURL := rewriteArtifactLinesForSuccess(body, url)
+	if oldURL != "" {
+		err = workflow.ExecuteActivity(
+			ctx,
+			activities.DeletePDFByURL,
+			activities.DeletePDFByURLRequest{URL: oldURL},
+		).Get(ctx, nil)
+		if err != nil {
+			return err
 		}
-	}
-	if oldUrl == "" {
-		workflow.GetLogger(ctx).Warn("No existing artifact URL found in PR description")
-		lines = append(lines, prArtifactLinePrefix+" "+url)
-	}
-	body = strings.Join(lines, "\n")
-
-	// Delete old PDF URL from bucket
-	err = workflow.ExecuteActivity(
-		ctx,
-		activities.DeletePDFByURL,
-		activities.DeletePDFByURLRequest{URL: oldUrl},
-	).Get(ctx, nil)
-	if err != nil {
-		return err
 	}
 
 	// Update PR description
@@ -340,4 +404,118 @@ func updatePRDescription(ctx workflow.Context, repo github.ClientOptions, pr int
 			Body:          body,
 		},
 	).Get(ctx, nil)
+}
+
+func updatePRDescriptionFailure(ctx workflow.Context, repo github.ClientOptions, pr int, reason string) error {
+	var body string
+	err := workflow.ExecuteActivity(
+		ctx,
+		activities.GetPullRequestBody,
+		activities.GetPullRequestBodyRequest{
+			ClientOptions: repo,
+			PRNumber:      pr,
+		},
+	).Get(ctx, &body)
+	if err != nil {
+		return err
+	}
+
+	body = rewriteArtifactLinesForFailure(body, reason)
+	return workflow.ExecuteActivity(
+		ctx,
+		activities.UpdatePullRequestBody,
+		activities.UpdatePullRequestBodyRequest{
+			ClientOptions: repo,
+			PRNumber:      pr,
+			Body:          body,
+		},
+	).Get(ctx, nil)
+}
+
+func rewriteArtifactLinesForSuccess(body, url string) (string, string) {
+	lines := strings.Split(body, "\n")
+	next := make([]string, 0, len(lines)+1)
+	artifactFound := false
+	oldURL := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, prArtifactErrorLinePrefix):
+			// Clear stale error lines after a successful rebuild.
+			continue
+		case strings.HasPrefix(trimmed, prArtifactLinePrefix):
+			if !artifactFound {
+				oldURL = strings.TrimSpace(trimmed[len(prArtifactLinePrefix):])
+				next = append(next, prArtifactLinePrefix+" "+url)
+				artifactFound = true
+			}
+			continue
+		default:
+			next = append(next, line)
+		}
+	}
+	if !artifactFound {
+		next = append(next, prArtifactLinePrefix+" "+url)
+	}
+	return strings.Join(next, "\n"), oldURL
+}
+
+func rewriteArtifactLinesForFailure(body, reason string) string {
+	reason = sanitizeArtifactErrorReason(reason)
+	lines := strings.Split(body, "\n")
+	next := make([]string, 0, len(lines)+2)
+	artifactFound := false
+	errorFound := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, prArtifactLinePrefix):
+			if !artifactFound {
+				next = append(next, prArtifactLinePrefix)
+				artifactFound = true
+			}
+			continue
+		case strings.HasPrefix(trimmed, prArtifactErrorLinePrefix):
+			if !errorFound {
+				next = append(next, prArtifactErrorLinePrefix+" "+reason)
+				errorFound = true
+			}
+			continue
+		default:
+			next = append(next, line)
+		}
+	}
+	if !artifactFound {
+		next = append(next, prArtifactLinePrefix)
+	}
+	if !errorFound {
+		next = append(next, prArtifactErrorLinePrefix+" "+reason)
+	}
+	return strings.Join(next, "\n")
+}
+
+func sanitizeArtifactErrorReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "build failed"
+	}
+	reason = strings.ReplaceAll(reason, "\n", " ")
+	reason = strings.ReplaceAll(reason, "\r", " ")
+	reason = strings.Join(strings.Fields(reason), " ")
+	const maxLen = 200
+	if len(reason) > maxLen {
+		return reason[:maxLen]
+	}
+	return reason
+}
+
+func buildFailureReason(err error) string {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
+		var details []string
+		if detailsErr := appErr.Details(&details); detailsErr == nil && len(details) > 0 {
+			return sanitizeArtifactErrorReason(details[0])
+		}
+	}
+	return sanitizeArtifactErrorReason(err.Error())
 }

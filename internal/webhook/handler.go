@@ -3,10 +3,12 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/google/go-github/v81/github"
 	"go.temporal.io/sdk/client"
@@ -67,6 +69,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.sendSignal(r.Context(), signal); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			slog.Info("skipping event", "type", eventType, "reason", err)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		slog.Error("failed to send signal", "error", err)
 		http.Error(w, "failed to send signal", http.StatusInternalServerError)
 		return
@@ -101,6 +108,8 @@ func (h *Handler) processEvent(eventType string, event any) (*WebhookSignal, err
 		return h.processPullRequestReviewComment(e)
 	case *github.PullRequestEvent:
 		return h.processPullRequest(e)
+	case *github.PushEvent:
+		return h.processPush(e)
 	default:
 		return nil, fmt.Errorf("unsupported event type: %s", eventType)
 	}
@@ -199,12 +208,86 @@ func (h *Handler) processPullRequest(e *github.PullRequestEvent) (*WebhookSignal
 	}, nil
 }
 
+func (h *Handler) processPush(e *github.PushEvent) (*WebhookSignal, error) {
+	if e.GetDeleted() {
+		return nil, fmt.Errorf("ignoring deleted ref")
+	}
+
+	ref := e.GetRef()
+	const headPrefix = "refs/heads/"
+	if !strings.HasPrefix(ref, headPrefix) {
+		return nil, fmt.Errorf("ignoring non-branch ref: %s", ref)
+	}
+	branch := strings.TrimPrefix(ref, headPrefix)
+	if branch == "" {
+		return nil, fmt.Errorf("ignoring empty branch ref")
+	}
+
+	author := e.GetSender().GetLogin()
+	if author == "" {
+		author = e.GetPusher().GetName()
+	}
+	owner, repo := resolvePushRepoCoordinates(e)
+	if owner == "" || repo == "" {
+		return nil, fmt.Errorf("missing repository owner/repo in push event")
+	}
+
+	return &WebhookSignal{
+		Type:        "push",
+		Action:      "pushed",
+		Owner:       owner,
+		Repo:        repo,
+		PRNumber:    0,
+		PRTitle:     "",
+		PRBranch:    branch,
+		Body:        "",
+		AuthorLogin: author,
+		ReviewState: "",
+		Timestamp:   e.GetRepo().GetPushedAt().Time,
+		FilePath:    "",
+		Line:        0,
+		StartLine:   0,
+		DiffHunk:    "",
+	}, nil
+}
+
+func resolvePushRepoCoordinates(e *github.PushEvent) (string, string) {
+	repo := e.GetRepo().GetName()
+	owner := e.GetRepo().GetOwner().GetLogin()
+	if owner != "" && repo != "" {
+		return owner, repo
+	}
+
+	fullName := strings.TrimSpace(e.GetRepo().GetFullName())
+	if fullName != "" {
+		parts := strings.SplitN(fullName, "/", 2)
+		if len(parts) == 2 {
+			fullOwner := strings.TrimSpace(parts[0])
+			fullRepo := strings.TrimSpace(parts[1])
+			if owner == "" {
+				owner = fullOwner
+			}
+			if repo == "" {
+				repo = fullRepo
+			}
+		}
+	}
+	return owner, repo
+}
+
 func (h *Handler) sendSignal(ctx context.Context, signal *WebhookSignal) error {
-	workflowID, err := h.resolver.Resolve(ctx, signal.Owner, signal.Repo, signal.PRNumber)
+	workflowID, err := h.resolver.Resolve(ctx, signal)
 	if err != nil {
 		return fmt.Errorf("failed to resolve workflow ID: %w", err)
 	}
 
 	// Use empty run ID to signal the latest run
-	return h.temporalClient.SignalWorkflow(ctx, workflowID, "", ReviewAgentSignal, signal)
+	return h.temporalClient.SignalWorkflow(ctx, workflowID, "", signalNameForSignal(signal), signal)
+}
+
+func signalNameForSignal(signal *WebhookSignal) string {
+	if signal != nil && signal.Type == "push" {
+		return RebuildSignal
+	}
+	return ReviewAgentSignal
 }
