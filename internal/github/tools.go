@@ -95,7 +95,7 @@ func (m *toolsManager) tools(ctx context.Context) ([]llm.ToolDefinition, error) 
 
 	tools := make([]llm.ToolDefinition, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		if slices.Contains(bannedTools, tool.Name) {
+		if isBannedTool(tool.Name) {
 			continue
 		}
 
@@ -135,7 +135,7 @@ func (m *toolsManager) callTool(ctx context.Context, params *mcp.CallToolParams)
 	if params.Name == "" {
 		return nil, fmt.Errorf("tool name is required")
 	}
-	if slices.Contains(bannedTools, params.Name) {
+	if isBannedTool(params.Name) {
 		return nil, fmt.Errorf("tool %q is not allowed", params.Name)
 	}
 
@@ -242,9 +242,16 @@ func (t *Tools) ToolDefinitions(ctx context.Context) ([]llm.ToolDefinition, erro
 
 	tools := make([]llm.ToolDefinition, 0, len(result.Tools))
 	for _, tool := range result.Tools {
+		if isBannedTool(tool.Name) {
+			continue
+		}
 		tools = append(tools, mcpToolToCanonical(tool))
 	}
 	return tools, nil
+}
+
+func isBannedTool(name string) bool {
+	return slices.Contains(bannedTools, name)
 }
 
 func mcpToolToCanonical(tool *mcp.Tool) llm.ToolDefinition {
