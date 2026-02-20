@@ -21,18 +21,18 @@ func NewFileStrategy() *FileStrategy {
 	baseDir := os.Getenv("JOB_FILE_BASE_DIR")
 	if strings.TrimSpace(baseDir) == "" {
 		// Default to the current working directory if not configured.
-		if cwd, err := os.Getwd(); err == nil {
-			baseDir = cwd
-		} else {
-			// As a last resort, fall back to the filesystem root.
-			baseDir = string(os.PathSeparator)
+		cwd, err := os.Getwd()
+		if err != nil {
+			// Fail closed: leave baseDir empty so Fetch rejects access.
+			return &FileStrategy{}
 		}
+		baseDir = cwd
 	}
 
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
-		// If we cannot resolve the base directory, fall back to root to avoid panics.
-		absBase = string(os.PathSeparator)
+		// Fail closed: leave baseDir empty so Fetch rejects access.
+		return &FileStrategy{}
 	}
 	absBase = filepath.Clean(absBase)
 
@@ -93,23 +93,22 @@ func (s *FileStrategy) Fetch(_ context.Context, u *url.URL) (string, error) {
 	realBase = filepath.Clean(realBase)
 
 	// Enforce that realPath is inside realBase.
-	// Trailing separators are added to both sides to prevent a directory named
-	// with the same prefix (e.g. /safe/dir-evil vs /safe/dir) from matching.
-	base := realBase
-	if !strings.HasSuffix(base, string(os.PathSeparator)) {
-		base += string(os.PathSeparator)
+	relPath, err := filepath.Rel(realBase, realPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot compute relative path from %q to %q: %w", realBase, realPath, err)
 	}
-	pathWithSep := realPath
-	if !strings.HasSuffix(pathWithSep, string(os.PathSeparator)) {
-		pathWithSep += string(os.PathSeparator)
-	}
-	if !strings.HasPrefix(pathWithSep, base) {
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("file URL path %q is outside the allowed directory", absPath)
 	}
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("resolved relative path %q is absolute", relPath)
+	}
 
-	data, err := os.ReadFile(realPath)
+	safePath := filepath.Join(realBase, relPath)
+
+	data, err := os.ReadFile(safePath)
 	if err != nil {
-		return "", fmt.Errorf("read file %q: %w", realPath, err)
+		return "", fmt.Errorf("read file %q: %w", safePath, err)
 	}
 
 	return strings.TrimSpace(string(data)), nil
