@@ -10,8 +10,10 @@ const (
 )
 
 const (
-	ContentTypeText     = "text"
-	ContentTypeImageURL = "image_url"
+	ContentTypeText             = "text"
+	ContentTypeImageURL         = "image_url"
+	ContentTypeThinking         = "thinking"
+	ContentTypeRedactedThinking = "redacted_thinking"
 )
 
 type ResponseTextFormat struct {
@@ -25,6 +27,9 @@ type ContentPart struct {
 	Text        string `json:"text,omitempty"`
 	ImageURL    string `json:"image_url,omitempty"`
 	ImageDetail string `json:"image_detail,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
+	Data        string `json:"data,omitempty"`
 }
 
 type ToolDefinition struct {
@@ -58,6 +63,21 @@ func ImageURLPart(url string, detail ...string) ContentPart {
 		imageDetail = detail[0]
 	}
 	return ContentPart{Type: ContentTypeImageURL, ImageURL: url, ImageDetail: imageDetail}
+}
+
+func ThinkingPart(signature, thinking string) ContentPart {
+	return ContentPart{
+		Type:      ContentTypeThinking,
+		Thinking:  thinking,
+		Signature: signature,
+	}
+}
+
+func RedactedThinkingPart(data string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeRedactedThinking,
+		Data: data,
+	}
 }
 
 func TextMessage(role string, text string) Message {

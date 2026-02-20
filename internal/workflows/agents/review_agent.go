@@ -66,9 +66,9 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 
 	conversation, err := createConversation(ctx, agentCfg.Model, []llm.Message{
 		systemMessage(agentCfg.Instructions),
-		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
-		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
-		userMessage("Branch Name: " + args.BranchName),
+		userMessage(wrapLLMXML("repository", args.Repo.Owner+"/"+args.Repo.Repo)),
+		userMessage(wrapLLMXML("branch", args.BranchName)),
+		userMessage(wrapLLMXML("pr", strconv.Itoa(args.Pr))),
 	})
 	if err != nil {
 		return err
@@ -170,7 +170,7 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 	}
 	workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
 	pendingInput := []llm.Message{
-		userMessage("User Review: " + string(signalBytes)),
+		userMessage(wrapLLMXML("reviewer_comment", string(signalBytes))),
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
 	dispatcher := &reviewAgentDispatcher{

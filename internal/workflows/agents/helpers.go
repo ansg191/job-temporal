@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"time"
 
 	"go.temporal.io/sdk/workflow"
@@ -61,4 +62,8 @@ func loadAgentConfig(ctx workflow.Context, agentName string) (*config.AgentConfi
 
 func temperatureOpt(t *float64) *float64 {
 	return t
+}
+
+func wrapLLMXML(tag, content string) string {
+	return fmt.Sprintf("<%s>\n%s\n</%s>", tag, content, tag)
 }

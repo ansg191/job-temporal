@@ -14,7 +14,7 @@ import (
 type anthropicBackend struct{}
 
 const (
-	anthropicDefaultMaxTokens int64 = 4096
+	anthropicDefaultMaxTokens int64 = 16384
 
 	anthropicCompactionBetaHeader   = "compact-2026-01-12"
 	anthropicCompactionEditType     = "compact_20260112"
@@ -72,6 +72,9 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		if req.Temperature != nil {
 			params.Temperature = anthropic.Float(*req.Temperature)
 		}
+		if thinking, ok := anthropicThinkingConfig(req.Model); ok {
+			params.Thinking = thinking
+		}
 		if req.Text != nil {
 			params.OutputConfig = anthropic.OutputConfigParam{
 				Format: anthropic.JSONOutputFormatParam{
@@ -122,6 +125,10 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 					case anthropic.TextBlock:
 						output.WriteString(variant.Text)
 						assistant.Content = append(assistant.Content, TextPart(variant.Text))
+					case anthropic.ThinkingBlock:
+						assistant.Content = append(assistant.Content, ThinkingPart(variant.Signature, variant.Thinking))
+					case anthropic.RedactedThinkingBlock:
+						assistant.Content = append(assistant.Content, RedactedThinkingPart(variant.Data))
 					case anthropic.ToolUseBlock:
 						b, marshalErr := json.Marshal(variant.Input)
 						if marshalErr != nil {
@@ -208,6 +215,20 @@ func anthropicSupportsCompaction(model string) bool {
 	return strings.Contains(model, "opus-4-6") || strings.Contains(model, "sonnet-4-6")
 }
 
+func anthropicThinkingConfig(model string) (anthropic.ThinkingConfigParamUnion, bool) {
+	if !anthropicSupportsAdaptiveThinking(model) {
+		return anthropic.ThinkingConfigParamUnion{}, false
+	}
+
+	adaptive := anthropic.NewThinkingConfigAdaptiveParam()
+	return anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive}, true
+}
+
+func anthropicSupportsAdaptiveThinking(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "opus-4-6") || strings.Contains(model, "sonnet-4-6")
+}
+
 func anthropicMessagesFromTranscript(
 	transcript []Message,
 	instructions string,
@@ -255,6 +276,7 @@ func anthropicMessagesFromTranscript(
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(toolCall.CallID, args, toolCall.Name))
 			}
+			blocks = ensureAnthropicAssistantMessageEnding(blocks)
 			if len(blocks) == 0 {
 				continue
 			}
@@ -292,11 +314,33 @@ func anthropicContentBlocksFromParts(parts []ContentPart) ([]anthropic.ContentBl
 			blocks = append(blocks, anthropic.NewTextBlock(part.Text))
 		case ContentTypeImageURL:
 			blocks = append(blocks, anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: part.ImageURL}))
+		case ContentTypeThinking:
+			if strings.TrimSpace(part.Signature) == "" {
+				return nil, fmt.Errorf("anthropic thinking content block missing signature")
+			}
+			blocks = append(blocks, anthropic.NewThinkingBlock(part.Signature, part.Thinking))
+		case ContentTypeRedactedThinking:
+			if strings.TrimSpace(part.Data) == "" {
+				return nil, fmt.Errorf("anthropic redacted thinking content block missing data")
+			}
+			blocks = append(blocks, anthropic.NewRedactedThinkingBlock(part.Data))
 		default:
 			return nil, fmt.Errorf("unsupported anthropic content type %q", part.Type)
 		}
 	}
 	return blocks, nil
+}
+
+func ensureAnthropicAssistantMessageEnding(blocks []anthropic.ContentBlockParamUnion) []anthropic.ContentBlockParamUnion {
+	if len(blocks) == 0 {
+		return blocks
+	}
+	last := blocks[len(blocks)-1]
+	if last.OfThinking == nil && last.OfRedactedThinking == nil {
+		return blocks
+	}
+	// Anthropic rejects assistant messages that end with thinking blocks.
+	return append(blocks, anthropic.NewTextBlock(""))
 }
 
 func anthropicToolsFromCanonical(tools []ToolDefinition) []anthropic.ToolUnionParam {
@@ -326,19 +370,29 @@ func setAnthropicCacheControlOnLastContentBlock(msg *anthropic.MessageParam) {
 	if msg == nil || len(msg.Content) == 0 {
 		return
 	}
-	last := &msg.Content[len(msg.Content)-1]
 	cacheControl := anthropic.NewCacheControlEphemeralParam()
-	switch {
-	case last.OfText != nil:
-		last.OfText.CacheControl = cacheControl
-	case last.OfImage != nil:
-		last.OfImage.CacheControl = cacheControl
-	case last.OfDocument != nil:
-		last.OfDocument.CacheControl = cacheControl
-	case last.OfToolResult != nil:
-		last.OfToolResult.CacheControl = cacheControl
-	case last.OfToolUse != nil:
-		last.OfToolUse.CacheControl = cacheControl
+	for i := len(msg.Content) - 1; i >= 0; i-- {
+		block := &msg.Content[i]
+		switch {
+		case block.OfText != nil:
+			if block.OfText.Text == "" {
+				continue
+			}
+			block.OfText.CacheControl = cacheControl
+			return
+		case block.OfImage != nil:
+			block.OfImage.CacheControl = cacheControl
+			return
+		case block.OfDocument != nil:
+			block.OfDocument.CacheControl = cacheControl
+			return
+		case block.OfToolResult != nil:
+			block.OfToolResult.CacheControl = cacheControl
+			return
+		case block.OfToolUse != nil:
+			block.OfToolUse.CacheControl = cacheControl
+			return
+		}
 	}
 }
 
