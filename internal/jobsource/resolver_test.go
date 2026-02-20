@@ -72,7 +72,7 @@ func TestResolverResolveFileURL(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	r := NewResolver(NewFileStrategy())
+	r := NewResolver(&FileStrategy{baseDir: dir})
 	rawURL := "file://" + filepath.ToSlash(filePath)
 
 	got, err := r.Resolve(context.Background(), rawURL)
