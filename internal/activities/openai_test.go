@@ -84,3 +84,26 @@ func TestClassifyOpenAIError_URLTimeoutIsRetryable(t *testing.T) {
 		t.Fatalf("expected timeout URL error to remain retryable")
 	}
 }
+
+func TestClassifyOpenAIError_Any400IsNonRetryable(t *testing.T) {
+	t.Parallel()
+
+	input := &openai.Error{
+		StatusCode: 400,
+		Type:       "bad_request",
+		Message:    "bad request",
+	}
+
+	err := classifyOpenAIError(input)
+
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected application error, got %T", err)
+	}
+	if !appErr.NonRetryable() {
+		t.Fatalf("expected non-retryable application error")
+	}
+	if appErr.Type() != "OpenAIInvalidRequestError" {
+		t.Fatalf("expected OpenAIInvalidRequestError type, got %q", appErr.Type())
+	}
+}

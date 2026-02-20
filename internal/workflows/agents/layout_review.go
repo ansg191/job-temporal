@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/llm"
 )
 
 func ReviewPDFLayoutWorkflow(ctx workflow.Context, req activities.ReviewPDFLayoutRequest) (string, error) {
@@ -67,27 +66,23 @@ func analyzeLayoutReview(
 		return nil, errors.New("no rendered pages")
 	}
 
-	content := responses.ResponseInputMessageContentListParam{
-		responses.ResponseInputContentParamOfInputText(
-			buildLayoutReviewUserPrompt(pages, focus),
-		),
+	content := []llm.ContentPart{
+		llm.TextPart(buildLayoutReviewUserPrompt(pages, focus)),
 	}
 	for _, page := range pages {
-		imagePart := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailHigh)
-		imagePart.OfInputImage.ImageURL = param.NewOpt(page.URL)
-		content = append(content, imagePart)
+		content = append(content, llm.ImageURLPart(page.URL))
 	}
 
-	input := responses.ResponseInputParam{
+	input := []llm.Message{
 		systemMessage(instructions),
-		userMessage(content),
+		userMessageParts(content),
 	}
 
-	var result *responses.Response
+	var result activities.AIResponse
 	err := workflow.ExecuteActivity(
 		withCallAIActivityOptions(ctx),
 		activities.CallAI,
-		activities.OpenAIResponsesRequest{
+		activities.AIRequest{
 			Model:       model,
 			Input:       input,
 			Text:        activities.LayoutReviewTextFormat,
@@ -99,7 +94,7 @@ func analyzeLayoutReview(
 	}
 
 	var output activities.ReviewPDFLayoutOutput
-	if err = json.Unmarshal([]byte(result.OutputText()), &output); err != nil {
+	if err = json.Unmarshal([]byte(result.OutputText), &output); err != nil {
 		return nil, fmt.Errorf("failed to parse layout review output: %w", err)
 	}
 

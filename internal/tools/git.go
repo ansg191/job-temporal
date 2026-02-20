@@ -1,14 +1,8 @@
 package tools
 
-import (
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
-)
+import "github.com/ansg191/job-temporal/internal/llm"
 
-var ListBranchesToolDesc = responses.ToolUnionParam{
-	OfFunction: &responses.FunctionToolParam{
-		Name:        "list_branches",
-		Strict:      openai.Bool(false),
-		Description: openai.String("List all branches in the current git repository"),
-	},
+var ListBranchesToolDesc = llm.ToolDefinition{
+	Name:        "list_branches",
+	Description: "List all branches in the current git repository",
 }

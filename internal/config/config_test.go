@@ -13,7 +13,7 @@ func TestLoadAgentConfig_ValidFile(t *testing.T) {
 
 	// Create a valid YAML config file
 	configContent := `instructions: "Test instructions for agent"
-model: "gpt-4"
+model: "openai/gpt-4"
 temperature: 0.75
 `
 	configPath := filepath.Join(tmpDir, "test-agent.yaml")
@@ -36,8 +36,8 @@ temperature: 0.75
 	if config.Instructions != "Test instructions for agent" {
 		t.Errorf("Expected instructions 'Test instructions for agent', got %q", config.Instructions)
 	}
-	if config.Model != "gpt-4" {
-		t.Errorf("Expected model 'gpt-4', got %q", config.Model)
+	if config.Model != "openai/gpt-4" {
+		t.Errorf("Expected model 'openai/gpt-4', got %q", config.Model)
 	}
 	if config.Temperature == nil {
 		t.Error("Expected temperature to be set")
@@ -106,7 +106,7 @@ func TestLoadAgentConfig_EmptyInstructions(t *testing.T) {
 
 	// Create a YAML config file with empty instructions
 	configContent := `instructions: ""
-model: "gpt-4"
+model: "openai/gpt-4"
 `
 	configPath := filepath.Join(tmpDir, "empty-instructions.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -157,6 +157,32 @@ model: ""
 
 	// Check error message contains expected info
 	expectedSubstr := "model field is empty"
+	if !strings.Contains(err.Error(), expectedSubstr) {
+		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
+	}
+}
+
+func TestLoadAgentConfig_InvalidModelFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configContent := `instructions: "Test instructions"
+model: "gpt-4"
+`
+	configPath := filepath.Join(tmpDir, "invalid-model.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	oldEnv := os.Getenv("AGENT_CONFIG_DIR")
+	os.Setenv("AGENT_CONFIG_DIR", tmpDir)
+	defer os.Setenv("AGENT_CONFIG_DIR", oldEnv)
+
+	_, err := LoadAgentConfig("invalid-model")
+	if err == nil {
+		t.Fatal("Expected error for invalid model format, got nil")
+	}
+
+	expectedSubstr := "invalid model"
 	if !strings.Contains(err.Error(), expectedSubstr) {
 		t.Errorf("Expected error to contain %q, got: %v", expectedSubstr, err)
 	}

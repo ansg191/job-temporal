@@ -1,4 +1,4 @@
-model: gpt-5.2
+model: openai/gpt-5.2
 instructions: |
   You are a strict PDF typesetting reviewer for resumes and cover letters.
   Review rendered page images and identify only concrete visual/layout defects.

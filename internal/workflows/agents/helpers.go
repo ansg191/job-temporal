@@ -3,68 +3,40 @@ package agents
 import (
 	"time"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/config"
+	"github.com/ansg191/job-temporal/internal/llm"
 )
 
-func messageWithRole[T string | responses.ResponseInputMessageContentListParam](
-	content T,
-	role responses.EasyInputMessageRole,
-) responses.ResponseInputItemUnionParam {
-	msg := responses.ResponseInputItemParamOfMessage(content, role)
-	if msg.OfMessage != nil {
-		msg.OfMessage.Type = responses.EasyInputMessageTypeMessage
-	}
-	return msg
+func userMessage(content string) llm.Message {
+	return llm.TextMessage(llm.RoleUser, content)
 }
 
-// userMessage builds a user-role input message for the OpenAI responses API.
-func userMessage[T string | responses.ResponseInputMessageContentListParam](content T) responses.ResponseInputItemUnionParam {
-	return messageWithRole(content, responses.EasyInputMessageRoleUser)
+func userMessageParts(parts []llm.ContentPart) llm.Message {
+	return llm.Message{Role: llm.RoleUser, Content: parts}
 }
 
-// systemMessage builds a system-role input message for the OpenAI responses API.
-func systemMessage[T string | responses.ResponseInputMessageContentListParam](content T) responses.ResponseInputItemUnionParam {
-	return messageWithRole(content, responses.EasyInputMessageRoleSystem)
+func systemMessage(content string) llm.Message {
+	return llm.TextMessage(llm.RoleSystem, content)
 }
 
-// filterFunctionCalls keeps only function_call output items.
-func filterFunctionCalls(output []responses.ResponseOutputItemUnion) []responses.ResponseOutputItemUnion {
-	var calls []responses.ResponseOutputItemUnion
-	for _, item := range output {
-		if item.Type == "function_call" {
-			calls = append(calls, item)
-		}
-	}
-	return calls
+func hasFunctionCalls(calls []llm.ToolCall) bool {
+	return len(calls) > 0
 }
 
-// hasFunctionCalls reports whether any output item is a function_call.
-func hasFunctionCalls(output []responses.ResponseOutputItemUnion) bool {
-	for _, item := range output {
-		if item.Type == "function_call" {
-			return true
-		}
-	}
-	return false
-}
-
-func createConversation(ctx workflow.Context, items responses.ResponseInputParam) (string, error) {
-	var conversationID string
+func createConversation(ctx workflow.Context, model string, items []llm.Message) (*llm.ConversationState, error) {
+	var conversation llm.ConversationState
 	err := workflow.ExecuteActivity(
 		ctx,
 		activities.CreateConversation,
-		activities.OpenAIConversationRequest{Items: items},
-	).Get(ctx, &conversationID)
+		activities.ConversationRequest{Model: model, Items: items},
+	).Get(ctx, &conversation)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return conversationID, nil
+	return &conversation, nil
 }
 
 func withCallAIActivityOptions(ctx workflow.Context) workflow.Context {
@@ -87,10 +59,6 @@ func loadAgentConfig(ctx workflow.Context, agentName string) (*config.AgentConfi
 	return &agentCfg, nil
 }
 
-// temperatureOpt converts a *float64 config temperature to the param.Opt type used by OpenAI.
-func temperatureOpt(t *float64) (opt param.Opt[float64]) {
-	if t != nil {
-		opt = openai.Float(*t)
-	}
-	return
+func temperatureOpt(t *float64) *float64 {
+	return t
 }

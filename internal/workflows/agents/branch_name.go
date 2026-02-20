@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/llm"
 	"github.com/ansg191/job-temporal/internal/tools"
 )
 
@@ -39,59 +39,50 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 		return "", err
 	}
 
-	messages := responses.ResponseInputParam{
+	messages := []llm.Message{
 		systemMessage(agentCfg.Instructions),
 		userMessage("Purpose: " + string(req.Purpose)),
 		userMessage("Job Description:\n" + req.JobDescription),
 	}
 
-	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
-	}
+	ao := workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	dispatcher := &branchNameDispatcher{ghOpts: req.ClientOptions}
-	conversationID, err := createConversation(ctx, nil)
+	conversation, err := createConversation(ctx, agentCfg.Model, nil)
 	if err != nil {
 		return "", err
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
 
 	for range 5 {
-		var result *responses.Response
+		var result activities.AIResponse
 		err = workflow.ExecuteActivity(
 			callAICtx,
 			activities.CallAI,
-			activities.OpenAIResponsesRequest{
-				Model: agentCfg.Model,
-				Input: messages,
-				Tools: []responses.ToolUnionParam{
-					tools.ListBranchesToolDesc,
-				},
-				Temperature:    temperatureOpt(agentCfg.Temperature),
-				ConversationID: conversationID,
+			activities.AIRequest{
+				Model:        agentCfg.Model,
+				Input:        messages,
+				Tools:        []llm.ToolDefinition{tools.ListBranchesToolDesc},
+				Temperature:  temperatureOpt(agentCfg.Temperature),
+				Conversation: conversation,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return "", err
 		}
+		conversation = result.Conversation
 
-		if hasFunctionCalls(result.Output) {
-			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+		if hasFunctionCalls(result.ToolCalls) {
+			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
 
-		branchName := result.OutputText()
-
-		req := activities.CreateBranchRequest{
-			ClientOptions: req.ClientOptions,
-			Branch:        branchName,
-		}
-		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, req).Get(ctx, nil)
+		branchName := result.OutputText
+		createReq := activities.CreateBranchRequest{ClientOptions: req.ClientOptions, Branch: branchName}
+		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, createReq).Get(ctx, nil)
 		if err != nil {
-			messages = responses.ResponseInputParam{
-				userMessage("Unable to create branch: " + err.Error() + "\n"),
-			}
+			messages = []llm.Message{userMessage("Unable to create branch: " + err.Error() + "\n")}
 			continue
 		}
 		return branchName, nil
@@ -104,9 +95,9 @@ type branchNameDispatcher struct {
 	ghOpts github.ClientOptions
 }
 
-func (d *branchNameDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
+func (d *branchNameDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall) (workflow.Future, error) {
 	switch call.Name {
-	case tools.ListBranchesToolDesc.OfFunction.Name:
+	case tools.ListBranchesToolDesc.Name:
 		req := activities.ListBranchesRequest{ClientOptions: d.ghOpts}
 		return workflow.ExecuteActivity(ctx, activities.ListBranches, req), nil
 	default:

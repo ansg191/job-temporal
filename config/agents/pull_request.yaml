@@ -1,4 +1,4 @@
-model: gpt-5.2
+model: anthropic/claude-sonnet-4-6
 instructions: |
   You are a pull request agent who creates pull requests for the repository.
   These pull requests are created from branches that were created by previous agents.

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/llm"
 )
 
 const (
@@ -21,11 +21,11 @@ const (
 	githubToolRetryMaxBackoff  = 8 * time.Second
 )
 
-func ListGithubTools(ctx context.Context) ([]responses.ToolUnionParam, error) {
-	var aiTools []responses.ToolUnionParam
+func ListGithubTools(ctx context.Context) ([]llm.ToolDefinition, error) {
+	var aiTools []llm.ToolDefinition
 	err := retryGithubRateLimit(ctx, func() error {
 		var err error
-		aiTools, err = github.SharedOpenAITools(ctx)
+		aiTools, err = github.SharedTools(ctx)
 		return err
 	})
 	if err != nil {
@@ -34,7 +34,7 @@ func ListGithubTools(ctx context.Context) ([]responses.ToolUnionParam, error) {
 	return aiTools, nil
 }
 
-func CallGithubTool(ctx context.Context, call responses.ResponseOutputItemUnion) (string, error) {
+func CallGithubTool(ctx context.Context, call llm.ToolCall) (string, error) {
 	log.Println(call.Name, call.Arguments)
 
 	args, err := parseArgs(call.Arguments)
@@ -73,14 +73,15 @@ func CallGithubTool(ctx context.Context, call responses.ResponseOutputItemUnion)
 
 func parseArgs(argStr string) (map[string]any, error) {
 	argStr = strings.TrimSpace(argStr)
+	if argStr == "" {
+		return map[string]any{}, nil
+	}
 
-	// Case 1: arguments are a JSON object already
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(argStr), &obj); err == nil {
 		return obj, nil
 	}
 
-	// Case 2: arguments are a JSON string containing JSON
 	var inner string
 	if err := json.Unmarshal([]byte(argStr), &inner); err != nil {
 		return nil, fmt.Errorf("arguments not object or json-string: %w", err)

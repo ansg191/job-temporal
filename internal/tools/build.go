@@ -1,14 +1,8 @@
 package tools
 
-import (
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
-)
+import "github.com/ansg191/job-temporal/internal/llm"
 
-var BuildToolDesc = responses.ToolUnionParam{
-	OfFunction: &responses.FunctionToolParam{
-		Name:        "build",
-		Strict:      openai.Bool(false),
-		Description: openai.String("Perform a compilation build, returning errors if they occur"),
-	},
+var BuildToolDesc = llm.ToolDefinition{
+	Name:        "build",
+	Description: "Perform a compilation build, returning errors if they occur",
 }
