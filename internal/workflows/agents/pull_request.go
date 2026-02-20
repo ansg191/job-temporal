@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/llm"
 	"github.com/ansg191/job-temporal/internal/tools"
 )
 
@@ -100,7 +100,7 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 		return 0, err
 	}
 
-	messages := responses.ResponseInputParam{
+	messages := []llm.Message{
 		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + req.Owner + "/" + req.Repo),
 		userMessage("Branch Name: " + req.Branch),
@@ -113,12 +113,12 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	var aiTools []responses.ToolUnionParam
+	var aiTools []llm.ToolDefinition
 	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
 	}
-	conversationID, err := createConversation(ctx, nil)
+	conversation, err := createConversation(ctx, agentCfg.Model, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -127,37 +127,38 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 	dispatcher := &githubDispatcher{aiTools: aiTools}
 
 	for {
-		var result *responses.Response
+		var result activities.AIResponse
 		err = workflow.ExecuteActivity(
 			callAICtx,
 			activities.CallAI,
-			activities.OpenAIResponsesRequest{
-				Model:          agentCfg.Model,
-				Input:          messages,
-				Tools:          aiTools,
-				Text:           prOutputFormat,
-				Temperature:    temperatureOpt(agentCfg.Temperature),
-				ConversationID: conversationID,
+			activities.AIRequest{
+				Model:        agentCfg.Model,
+				Input:        messages,
+				Tools:        aiTools,
+				Text:         prOutputFormat,
+				Temperature:  temperatureOpt(agentCfg.Temperature),
+				Conversation: conversation,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
+		conversation = result.Conversation
 
-		if hasFunctionCalls(result.Output) {
-			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+		if hasFunctionCalls(result.ToolCalls) {
+			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
 
 		var pr prOutput
-		if err = json.Unmarshal([]byte(result.OutputText()), &pr); err != nil {
-			messages = responses.ResponseInputParam{
+		if err = json.Unmarshal([]byte(result.OutputText), &pr); err != nil {
+			messages = []llm.Message{
 				userMessage("Invalid output format: " + err.Error()),
 			}
 			continue
 		}
 		if err = validatePRArtifactURL(pr.Body, pdfURL); err != nil {
-			messages = responses.ResponseInputParam{
+			messages = []llm.Message{
 				userMessage("Invalid PR body: " + err.Error()),
 			}
 			continue
@@ -209,12 +210,12 @@ func validatePRArtifactURL(body string, url string) error {
 }
 
 type githubDispatcher struct {
-	aiTools []responses.ToolUnionParam
+	aiTools []llm.ToolDefinition
 }
 
-func (d *githubDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
-		return param.OfFunction != nil && param.OfFunction.Name == call.Name
+func (d *githubDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param llm.ToolDefinition) bool {
+		return param.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}

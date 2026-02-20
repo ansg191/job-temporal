@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/ansg191/job-temporal/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,6 +60,9 @@ func LoadAgentConfig(agentName string) (*AgentConfig, error) {
 	}
 	if config.Model == "" {
 		return nil, fmt.Errorf("config file %s: model field is empty", configPath)
+	}
+	if _, err := llm.ParseModelRef(config.Model); err != nil {
+		return nil, fmt.Errorf("config file %s: invalid model %q: %w", configPath, config.Model, err)
 	}
 
 	return &config, nil

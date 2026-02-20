@@ -5,17 +5,27 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/ansg191/job-temporal/internal/llm"
 )
 
 const DefaultGithubURL = "https://api.githubcopilot.com/mcp"
+
+// bannedTools is a list of disallowed tool actions that cannot be accessed or executed by the agent.
+var bannedTools = []string{
+	"create_pull_request",
+	"merge_pull_request",
+	"fork_repository",
+	"create_branch",
+	"create_repository",
+}
 
 type Tools struct {
 	*mcp.ClientSession
@@ -69,23 +79,27 @@ func NewTools(ctx context.Context, url string) (*Tools, error) {
 	return &Tools{session}, nil
 }
 
-func SharedOpenAITools(ctx context.Context) ([]responses.ToolUnionParam, error) {
-	return sharedTools.openAITools(ctx)
+func SharedTools(ctx context.Context) ([]llm.ToolDefinition, error) {
+	return sharedTools.tools(ctx)
 }
 
 func SharedCallTool(ctx context.Context, params *mcp.CallToolParams) (*mcp.CallToolResult, error) {
 	return sharedTools.callTool(ctx, params)
 }
 
-func (m *toolsManager) openAITools(ctx context.Context) ([]responses.ToolUnionParam, error) {
+func (m *toolsManager) tools(ctx context.Context) ([]llm.ToolDefinition, error) {
 	result, err := m.listTools(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	tools := make([]responses.ToolUnionParam, 0, len(result.Tools))
+	tools := make([]llm.ToolDefinition, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		tools = append(tools, mcpToolToOpenAI(tool))
+		if slices.Contains(bannedTools, tool.Name) {
+			continue
+		}
+
+		tools = append(tools, mcpToolToCanonical(tool))
 	}
 	return tools, nil
 }
@@ -118,6 +132,13 @@ func (m *toolsManager) listTools(ctx context.Context) (*mcp.ListToolsResult, err
 }
 
 func (m *toolsManager) callTool(ctx context.Context, params *mcp.CallToolParams) (*mcp.CallToolResult, error) {
+	if params.Name == "" {
+		return nil, fmt.Errorf("tool name is required")
+	}
+	if slices.Contains(bannedTools, params.Name) {
+		return nil, fmt.Errorf("tool %q is not allowed", params.Name)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -212,32 +233,24 @@ func getMCPMinInterval() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// OpenAITools returns all available tools as a responses.ToolUnionParam slice.
-func (t *Tools) OpenAITools(ctx context.Context) ([]responses.ToolUnionParam, error) {
+// ToolDefinitions returns all available tools as canonical LLM tool definitions.
+func (t *Tools) ToolDefinitions(ctx context.Context) ([]llm.ToolDefinition, error) {
 	result, err := t.ListTools(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	tools := make([]responses.ToolUnionParam, 0, len(result.Tools))
+	tools := make([]llm.ToolDefinition, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		tools = append(tools, mcpToolToOpenAI(tool))
+		tools = append(tools, mcpToolToCanonical(tool))
 	}
 	return tools, nil
 }
 
-func mcpToolToOpenAI(tool *mcp.Tool) responses.ToolUnionParam {
-	fn := responses.FunctionToolParam{
-		Name: tool.Name,
-	}
-
-	if tool.Description != "" {
-		fn.Description = param.NewOpt(tool.Description)
-	}
-
+func mcpToolToCanonical(tool *mcp.Tool) llm.ToolDefinition {
+	ret := llm.ToolDefinition{Name: tool.Name, Description: tool.Description}
 	if schema, ok := tool.InputSchema.(map[string]any); ok {
-		fn.Parameters = schema
+		ret.Parameters = schema
 	}
-
-	return responses.ToolUnionParam{OfFunction: &fn}
+	return ret
 }

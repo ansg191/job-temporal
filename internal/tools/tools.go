@@ -1,26 +1,18 @@
 package tools
 
 import (
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
+	"github.com/ansg191/job-temporal/internal/llm"
 	"go.temporal.io/sdk/workflow"
 )
 
-func GetToolResult(ctx workflow.Context, fut workflow.Future, callID string) (responses.ResponseInputItemUnionParam, error) {
+func GetToolResult(ctx workflow.Context, fut workflow.Future, call llm.ToolCall) (llm.Message, error) {
 	var result string
 	err := fut.Get(ctx, &result)
 	if err != nil {
-		return responses.ResponseInputItemUnionParam{}, err
+		return llm.Message{}, err
 	}
 
-	return responses.ResponseInputItemUnionParam{
-		OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-			CallID: callID,
-			Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-				OfString: openai.String(result),
-			},
-		},
-	}, nil
+	return llm.ToolResultMessage(call.CallID, call.Name, result), nil
 }
 
 // ToolDispatcher is an interface for dispatching LLM tool calls and managing their asynchronous execution.
@@ -30,16 +22,16 @@ type ToolDispatcher interface {
 	// If the tool is not supported, it returns (nil, error) where the error message
 	// will be sent back to the AI as a tool result.
 	// If the tool is dispatched successfully, it returns (future, nil).
-	Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error)
+	Dispatch(ctx workflow.Context, call llm.ToolCall) (workflow.Future, error)
 }
 
 // ProcessToolCalls handles the common pattern of dispatching tool calls in parallel
 // and collecting their results.
 func ProcessToolCalls(
 	ctx workflow.Context,
-	toolCalls []responses.ResponseOutputItemUnion,
+	toolCalls []llm.ToolCall,
 	dispatch ToolDispatcher,
-) []responses.ResponseInputItemUnionParam {
+) []llm.Message {
 	futs := make([]workflow.Future, len(toolCalls))
 	errs := make([]error, len(toolCalls))
 
@@ -47,36 +39,20 @@ func ProcessToolCalls(
 		futs[i], errs[i] = dispatch.Dispatch(ctx, call)
 	}
 
-	var messages []responses.ResponseInputItemUnionParam
+	var messages []llm.Message
 	for i, fut := range futs {
-		callID := toolCalls[i].CallID
+		call := toolCalls[i]
 
 		if fut == nil {
 			if errs[i] != nil {
-				errMsg := errs[i].Error()
-				messages = append(messages, responses.ResponseInputItemUnionParam{
-					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-						CallID: callID,
-						Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-							OfString: openai.String(errMsg),
-						},
-					},
-				})
+				messages = append(messages, llm.ToolResultMessage(call.CallID, call.Name, errs[i].Error()))
 			}
 			continue
 		}
 
-		res, err := GetToolResult(ctx, fut, callID)
+		res, err := GetToolResult(ctx, fut, call)
 		if err != nil {
-			errMsg := err.Error()
-			messages = append(messages, responses.ResponseInputItemUnionParam{
-				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-					CallID: callID,
-					Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-						OfString: openai.String(errMsg),
-					},
-				},
-			})
+			messages = append(messages, llm.ToolResultMessage(call.CallID, call.Name, err.Error()))
 			continue
 		}
 		messages = append(messages, res)

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/llm"
 	"github.com/ansg191/job-temporal/internal/tools"
 )
 
@@ -44,7 +44,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		return 0, err
 	}
 
-	messages := responses.ResponseInputParam{
+	messages := []llm.Message{
 		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + req.Owner + "/" + req.Repo),
 		userMessage("Branch Name: " + req.BranchName),
@@ -56,12 +56,12 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	var aiTools []responses.ToolUnionParam
+	var aiTools []llm.ToolDefinition
 	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return 0, err
 	}
-	conversationID, err := createConversation(ctx, nil)
+	conversation, err := createConversation(ctx, agentCfg.Model, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -78,24 +78,25 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	}
 
 	for {
-		var result *responses.Response
+		var result activities.AIResponse
 		err = workflow.ExecuteActivity(
 			callAICtx,
 			activities.CallAI,
-			activities.OpenAIResponsesRequest{
-				Model:          agentCfg.Model,
-				Input:          messages,
-				Tools:          availableBuilderTools(aiTools),
-				Temperature:    temperatureOpt(agentCfg.Temperature),
-				ConversationID: conversationID,
+			activities.AIRequest{
+				Model:        agentCfg.Model,
+				Input:        messages,
+				Tools:        availableBuilderTools(aiTools),
+				Temperature:  temperatureOpt(agentCfg.Temperature),
+				Conversation: conversation,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return 0, err
 		}
+		conversation = result.Conversation
 
-		if hasFunctionCalls(result.Output) {
-			messages = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+		if hasFunctionCalls(result.ToolCalls) {
+			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
 
@@ -111,7 +112,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 				Branch:        req.BranchName,
 				Builder:       req.Builder,
 				File:          file,
-				Notes:         result.OutputText(),
+				Notes:         result.OutputText,
 			}
 			layoutReviewResult, layoutReviewJSON, err := runLayoutReviewGate(
 				ctx,
@@ -123,7 +124,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 				if errors.As(err, &appErr) && appErr.Type() == activities.ErrTypeBuildFailed {
 					var details []string
 					_ = appErr.Details(&details)
-					messages = responses.ResponseInputParam{userMessage(fmt.Sprintf(
+					messages = []llm.Message{userMessage(fmt.Sprintf(
 						"Build failed, fix and try again:\n%s",
 						strings.Join(details, "\n"),
 					))}
@@ -132,7 +133,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 				return 0, err
 			}
 			if block, reason := shouldBlockLayoutIssues(layoutReviewResult, layoutReviewRun); block {
-				messages = responses.ResponseInputParam{userMessage(
+				messages = []llm.Message{userMessage(
 					"Layout review gate blocked completion (" + reason + "). Keep editing and rebuilding.\nCurrent findings JSON:\n" + layoutReviewJSON,
 				)}
 				continue
@@ -164,22 +165,22 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 }
 
 type builderDispatcher struct {
-	aiTools     []responses.ToolUnionParam
+	aiTools     []llm.ToolDefinition
 	ghOpts      github.ClientOptions
 	branchName  string
 	builder     string
 	buildTarget BuildTarget
 }
 
-func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
-		return param.OfFunction != nil && param.OfFunction.Name == call.Name
+func (d *builderDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param llm.ToolDefinition) bool {
+		return param.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
 
 	switch call.Name {
-	case tools.BuildToolDesc.OfFunction.Name:
+	case tools.BuildToolDesc.Name:
 		file, err := resolveBuildTargetFile(d.buildTarget)
 		if err != nil {
 			return nil, err
@@ -197,8 +198,8 @@ func (d *builderDispatcher) Dispatch(ctx workflow.Context, call responses.Respon
 	}
 }
 
-func availableBuilderTools(aiTools []responses.ToolUnionParam) []responses.ToolUnionParam {
-	ret := append([]responses.ToolUnionParam{}, aiTools...)
+func availableBuilderTools(aiTools []llm.ToolDefinition) []llm.ToolDefinition {
+	ret := append([]llm.ToolDefinition{}, aiTools...)
 	ret = append(ret, tools.BuildToolDesc)
 	return ret
 }

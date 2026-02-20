@@ -1,4 +1,4 @@
-model: gpt-5.2
+model: openai/gpt-5.2
 instructions: |
   You are a review agent who reviews pull requests on GitHub.
   A previous agent before you created this pull request to modify

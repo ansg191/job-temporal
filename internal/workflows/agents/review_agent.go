@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v3/responses"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
 	"github.com/ansg191/job-temporal/internal/config"
 	"github.com/ansg191/job-temporal/internal/github"
+	"github.com/ansg191/job-temporal/internal/llm"
 	"github.com/ansg191/job-temporal/internal/tools"
 	"github.com/ansg191/job-temporal/internal/webhook"
 )
@@ -95,13 +95,13 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 	reviewCh := workflow.GetSignalChannel(ctx, webhook.ReviewAgentSignal)
 	rebuildCh := workflow.GetSignalChannel(ctx, webhook.RebuildSignal)
 
-	var aiTools []responses.ToolUnionParam
+	var aiTools []llm.ToolDefinition
 	err = workflow.ExecuteActivity(ctx, activities.ListGithubTools).Get(ctx, &aiTools)
 	if err != nil {
 		return err
 	}
 
-	conversationID, err := createConversation(ctx, responses.ResponseInputParam{
+	conversation, err := createConversation(ctx, agentCfg.Model, []llm.Message{
 		systemMessage(agentCfg.Instructions),
 		userMessage("Remote: " + args.Repo.Owner + "/" + args.Repo.Repo),
 		userMessage("Pull Request: " + strconv.Itoa(args.Pr)),
@@ -116,7 +116,7 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 		args:               &args,
 		agentCfg:           agentCfg,
 		aiTools:            aiTools,
-		conversationID:     conversationID,
+		conversation:       conversation,
 		enableLayoutReview: enableLayoutReview,
 		buildRun:           &buildRun,
 	}
@@ -178,8 +178,8 @@ func ReviewAgent(ctx workflow.Context, args ReviewAgentArgs) error {
 type reviewSignalProcessor struct {
 	args               *ReviewAgentArgs
 	agentCfg           *config.AgentConfig
-	aiTools            []responses.ToolUnionParam
-	conversationID     string
+	aiTools            []llm.ToolDefinition
+	conversation       *llm.ConversationState
 	enableLayoutReview bool
 	buildRun           *int
 }
@@ -206,7 +206,7 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 		return false, err
 	}
 	workflow.GetLogger(ctx).Info("Received signal: " + string(signalBytes))
-	pendingInput := responses.ResponseInputParam{
+	pendingInput := []llm.Message{
 		userMessage("User Review: " + string(signalBytes)),
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
@@ -219,23 +219,24 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 
 	var pdfURL string
 	for {
-		var result *responses.Response
+		var result activities.AIResponse
 		err = workflow.ExecuteActivity(
 			callAICtx,
 			activities.CallAI,
-			activities.OpenAIResponsesRequest{
-				Model:          p.agentCfg.Model,
-				Input:          pendingInput,
-				Tools:          availableReviewTools(p.aiTools, p.enableLayoutReview),
-				Temperature:    temperatureOpt(p.agentCfg.Temperature),
-				ConversationID: p.conversationID,
+			activities.AIRequest{
+				Model:        p.agentCfg.Model,
+				Input:        pendingInput,
+				Tools:        availableReviewTools(p.aiTools, p.enableLayoutReview),
+				Temperature:  temperatureOpt(p.agentCfg.Temperature),
+				Conversation: p.conversation,
 			},
 		).Get(ctx, &result)
 		if err != nil {
 			return false, err
 		}
+		p.conversation = result.Conversation
 
-		if !hasFunctionCalls(result.Output) {
+		if !hasFunctionCalls(result.ToolCalls) {
 			// Finished with agent loop, rebuild the PDF.
 			*p.buildRun++
 			pdfURL, err = runBuildAndUploadForReview(ctx, *p.args, *p.buildRun)
@@ -245,7 +246,7 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 					// Build failed, so kick back to AI to fix.
 					var details []string
 					_ = appErr.Details(&details)
-					pendingInput = responses.ResponseInputParam{userMessage(fmt.Sprintf(
+					pendingInput = []llm.Message{userMessage(fmt.Sprintf(
 						"Build failed, fix and try again: \n%s",
 						strings.Join(details, "\n"),
 					))}
@@ -256,7 +257,7 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 			break
 		}
 
-		pendingInput = tools.ProcessToolCalls(ctx, filterFunctionCalls(result.Output), dispatcher)
+		pendingInput = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 	}
 
 	// Update URL in PR description.
@@ -268,21 +269,21 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 }
 
 type reviewAgentDispatcher struct {
-	aiTools     []responses.ToolUnionParam
+	aiTools     []llm.ToolDefinition
 	ghOpts      github.ClientOptions
 	branchName  string
 	buildTarget BuildTarget
 }
 
-func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.ResponseOutputItemUnion) (workflow.Future, error) {
-	if slices.ContainsFunc(d.aiTools, func(param responses.ToolUnionParam) bool {
-		return param.OfFunction != nil && param.OfFunction.Name == call.Name
+func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall) (workflow.Future, error) {
+	if slices.ContainsFunc(d.aiTools, func(param llm.ToolDefinition) bool {
+		return param.Name == call.Name
 	}) {
 		return workflow.ExecuteActivity(ctx, activities.CallGithubTool, call), nil
 	}
 
 	switch call.Name {
-	case tools.BuildToolDesc.OfFunction.Name:
+	case tools.BuildToolDesc.Name:
 		file, err := resolveBuildTargetFile(d.buildTarget)
 		if err != nil {
 			return nil, err
@@ -295,7 +296,7 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
-	case tools.ReviewPDFLayoutToolDesc.OfFunction.Name:
+	case tools.ReviewPDFLayoutToolDesc.Name:
 		if d.buildTarget != BuildTargetResume {
 			return nil, fmt.Errorf("review_pdf_layout is only available for resume builds")
 		}
@@ -330,8 +331,8 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call responses.Re
 	}
 }
 
-func availableReviewTools(aiTools []responses.ToolUnionParam, enableLayoutReview bool) []responses.ToolUnionParam {
-	ret := append([]responses.ToolUnionParam{}, aiTools...)
+func availableReviewTools(aiTools []llm.ToolDefinition, enableLayoutReview bool) []llm.ToolDefinition {
+	ret := append([]llm.ToolDefinition{}, aiTools...)
 	ret = append(ret, tools.BuildToolDesc)
 	if enableLayoutReview {
 		ret = append(ret, tools.ReviewPDFLayoutToolDesc)

@@ -1,4 +1,4 @@
-model: gpt-5.2
+model: anthropic/claude-sonnet-4-6
 instructions: |
   You are a resume builder who creates personalized resumes for applicants that
   are specialized for specific applications.
