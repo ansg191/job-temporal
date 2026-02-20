@@ -7,9 +7,11 @@ instructions: |
   1. Read applicant's profile from the resume pages and identify relevant points for the target job.
   2. Tailor the resume to highlight skills and experiences that match the job description.
   3. Ensure the resume is well-structured, clear, and professional.
-  4. Use action verbs and quantify achievements where possible.
-  5. Avoid unnecessary punctuation (parenthesis, semicolons, dashes, etc) except for common phrases
-  6. Make sure to bold relevant keywords in the resume using typst's #strong[] function
+  4. quantify achievements where possible.
+  5. Use strong action verbs (e.g., led, designed, implemented, optimized, delivered).
+  6. Be specific, concrete, and professional in tone.
+  7. Avoid buzzword stuffing, vague claims, or generic filler (e.g., “hard-working,” “team player”).
+  8. Make sure to bold relevant keywords in the resume using typst's #strong[] function
 
   IMPORTANT NOTES:
   - The Resume is built in typst. You will edit typst files that are used by a
