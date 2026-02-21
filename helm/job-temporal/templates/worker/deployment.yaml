@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "job-temporal.fullname" . }}-worker
+  labels:
+    {{- include "job-temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  {{- if not .Values.worker.autoscaling.enabled }}
+  replicas: {{ .Values.worker.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "job-temporal.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "job-temporal.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "job-temporal.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.temporalAddress | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.sharedSecretName" . }}
+                  key: DATABASE_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: OPENAI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: ANTHROPIC_API_KEY
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: GITHUB_APP_ID
+            - name: GITHUB_INSTALL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: GITHUB_INSTALL_ID
+            - name: GITHUB_APP_PRIVATE_KEY
+              value: /run/secrets/github_app_private_key.pem
+            - name: GITHUB_MCP_MIN_INTERVAL_MS
+              value: {{ .Values.worker.githubMcpMinIntervalMs | quote }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "job-temporal.workerSecretName" . }}
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              value: {{ .Values.worker.awsRegion | quote }}
+            {{- if .Values.worker.awsEndpointUrl }}
+            - name: AWS_ENDPOINT_URL
+              value: {{ .Values.worker.awsEndpointUrl | quote }}
+            {{- end }}
+            {{- if .Values.worker.r2Bucket }}
+            - name: R2_BUCKET
+              value: {{ .Values.worker.r2Bucket | quote }}
+            {{- end }}
+            {{- if .Values.worker.r2PublicBaseUrl }}
+            - name: R2_PUBLIC_BASE_URL
+              value: {{ .Values.worker.r2PublicBaseUrl | quote }}
+            {{- end }}
+            {{- if .Values.worker.agentConfigDir }}
+            - name: AGENT_CONFIG_DIR
+              value: {{ .Values.worker.agentConfigDir | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: github-app-private-key
+              mountPath: /run/secrets/github_app_private_key.pem
+              subPath: GITHUB_APP_PRIVATE_KEY
+              readOnly: true
+            {{- with .Values.worker.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.worker.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.worker.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: github-app-private-key
+          secret:
+            secretName: {{ include "job-temporal.workerSecretName" . }}
+            items:
+              - key: GITHUB_APP_PRIVATE_KEY
+                path: GITHUB_APP_PRIVATE_KEY
+        {{- with .Values.worker.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

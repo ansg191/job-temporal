@@ -1,0 +1,41 @@
+CHART NAME: {{ .Chart.Name }}
+CHART VERSION: {{ .Chart.Version }}
+APP VERSION: {{ .Chart.AppVersion }}
+
+** Please be patient while the chart is being deployed **
+
+The following components have been deployed:
+  - server         (webhook receiver)      on port 8080
+  - trigger-server (trigger HTTP API)      on port 8090
+  - worker         (Temporal worker)
+
+=== External Secrets ===
+This chart requires the External Secrets Operator to be installed.
+See https://external-secrets.io for installation instructions.
+
+The following ExternalSecret resources have been created:
+  - {{ include "job-temporal.sharedSecretName" . }}  (DATABASE_URL)
+  - {{ include "job-temporal.serverSecretName" . }}  (GITHUB_WEBHOOK_SECRET)
+  - {{ include "job-temporal.workerSecretName" . }}  (worker secrets)
+
+Ensure your SecretStore "{{ .Values.externalSecrets.secretStoreRef.name }}" ({{ .Values.externalSecrets.secretStoreRef.kind }})
+is configured and can resolve all required secret keys before the pods will become ready.
+
+=== Services ===
+  kubectl get svc --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "job-temporal.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+{{- if .Values.ingress.enabled }}
+
+=== Ingress ===
+{{- if .Values.ingress.serverHost }}
+  Server (webhook):  http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.serverHost }}/webhook
+{{- end }}
+{{- if .Values.ingress.triggerServerHost }}
+  Trigger server:    http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.triggerServerHost }}/
+{{- end }}
+{{- else }}
+
+=== Port Forwarding (for local access) ===
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "job-temporal.fullname" . }}-server 8080:8080
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "job-temporal.fullname" . }}-trigger-server 8090:8090
+{{- end }}

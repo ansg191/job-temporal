@@ -1,0 +1,216 @@
+# Default values for job-temporal.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+imagePullSecrets: []
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+# This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# This is for setting Kubernetes Annotations to a Pod.
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
+podAnnotations: {}
+# This is for setting Kubernetes Labels to a Pod.
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Temporal server address
+temporalAddress: "temporal:7233"
+
+# -- External Secrets Operator configuration.
+# Requires the External Secrets Operator to be installed in the cluster.
+# See https://external-secrets.io for more information.
+externalSecrets:
+  # -- Reference to the SecretStore or ClusterSecretStore to use.
+  secretStoreRef:
+    name: ""
+    kind: ClusterSecretStore
+  # -- How often the ExternalSecret should be refreshed.
+  refreshInterval: "1h"
+  # -- Remote key paths for shared secrets (used by server, trigger-server, and worker).
+  shared:
+    # -- Remote key for DATABASE_URL
+    databaseUrlKey: "job-temporal/database-url"
+  # -- Remote key paths for server secrets.
+  server:
+    # -- Remote key for GITHUB_WEBHOOK_SECRET
+    githubWebhookSecretKey: "job-temporal/github-webhook-secret"
+  # -- Remote key paths for worker secrets.
+  worker:
+    # -- Remote key for OPENAI_API_KEY
+    openaiApiKeyKey: "job-temporal/openai-api-key"
+    # -- Remote key for ANTHROPIC_API_KEY
+    anthropicApiKeyKey: "job-temporal/anthropic-api-key"
+    # -- Remote key for GITHUB_APP_ID
+    githubAppIdKey: "job-temporal/github-app-id"
+    # -- Remote key for GITHUB_INSTALL_ID
+    githubInstallIdKey: "job-temporal/github-install-id"
+    # -- Remote key for GITHUB_APP_PRIVATE_KEY (PEM contents)
+    githubAppPrivateKeyKey: "job-temporal/github-app-private-key"
+    # -- Remote key for AWS_ACCESS_KEY_ID
+    awsAccessKeyIdKey: "job-temporal/aws-access-key-id"
+    # -- Remote key for AWS_SECRET_ACCESS_KEY
+    awsSecretAccessKeyKey: "job-temporal/aws-secret-access-key"
+
+# -- server deployment configuration (webhook receiver).
+server:
+  # -- Number of replicas.
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/ansg191/job-temporal/server
+    # This sets the pull policy for images.
+    pullPolicy: IfNotPresent
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: ""
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  resources: {}
+    # We usually recommend not to specify default resources and to leave this as a conscious
+    # choice for the user. This also increases chances charts run on environments with little
+    # resources, such as Minikube. If you do want to specify resources, uncomment the following
+    # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+    # limits:
+    #   cpu: 100m
+    #   memory: 128Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+
+  # This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 100
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80
+
+  livenessProbe: {}
+  readinessProbe: {}
+
+# -- trigger-server deployment configuration (trigger HTTP API).
+triggerServer:
+  # -- Number of replicas.
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/ansg191/job-temporal/trigger-server
+    pullPolicy: IfNotPresent
+    tag: ""
+
+  service:
+    type: ClusterIP
+    port: 8090
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 100
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80
+
+  livenessProbe: {}
+  readinessProbe: {}
+
+# -- worker deployment configuration.
+worker:
+  # -- Number of replicas.
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/ansg191/job-temporal/worker
+    pullPolicy: IfNotPresent
+    tag: ""
+
+  # -- Minimum interval between GitHub MCP calls in milliseconds.
+  githubMcpMinIntervalMs: "1500"
+
+  # -- AWS region.
+  awsRegion: "auto"
+  # -- AWS endpoint URL (for S3-compatible stores such as Cloudflare R2).
+  awsEndpointUrl: ""
+  # -- R2 bucket name.
+  r2Bucket: ""
+  # -- R2 public base URL.
+  r2PublicBaseUrl: ""
+
+  # -- Override the agent config directory inside the container.
+  # Defaults to the built-in config/agents/ path baked into the image.
+  agentConfigDir: ""
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 100
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80
+
+  livenessProbe: {}
+  readinessProbe: {}
+
+  # Additional volumes on the worker Deployment definition.
+  volumes: []
+  # - name: foo
+  #   secret:
+  #     secretName: mysecret
+  #     optional: false
+
+  # Additional volumeMounts on the worker Deployment definition.
+  volumeMounts: []
+  # - name: foo
+  #   mountPath: "/etc/foo"
+  #   readOnly: true
+
+# -- Ingress configuration.
+# The server webhook endpoint (/webhook) and trigger-server (/) are exposed via separate rules.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  # -- Hostname for the server webhook endpoint.
+  serverHost: ""
+  # -- Hostname for the trigger-server endpoint.
+  triggerServerHost: ""
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
