@@ -27,6 +27,10 @@ func hasFunctionCalls(calls []llm.ToolCall) bool {
 	return len(calls) > 0
 }
 
+func aiShouldContinue(resp activities.AIResponse) bool {
+	return resp.ShouldContinue
+}
+
 func createConversation(ctx workflow.Context, model string, items []llm.Message) (*llm.ConversationState, error) {
 	var conversation llm.ConversationState
 	err := workflow.ExecuteActivity(

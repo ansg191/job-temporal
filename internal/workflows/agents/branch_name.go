@@ -55,7 +55,7 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 	}
 	callAICtx := withCallAIActivityOptions(ctx)
 
-	for range 5 {
+	for attempts := 0; attempts < 5; {
 		var result activities.AIResponse
 		err = workflow.ExecuteActivity(
 			callAICtx,
@@ -77,12 +77,17 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
+		if aiShouldContinue(result) {
+			messages = nil
+			continue
+		}
 
 		branchName := result.OutputText
 		createReq := activities.CreateBranchRequest{ClientOptions: req.ClientOptions, Branch: branchName}
 		err = workflow.ExecuteActivity(ctx, activities.CreateBranch, createReq).Get(ctx, nil)
 		if err != nil {
 			messages = []llm.Message{userMessage("Unable to create branch: " + err.Error() + "\n")}
+			attempts++
 			continue
 		}
 		return branchName, nil

@@ -129,9 +129,11 @@ type Request struct {
 }
 
 type Response struct {
-	OutputText   string             `json:"output_text"`
-	ToolCalls    []ToolCall         `json:"tool_calls,omitempty"`
-	Conversation *ConversationState `json:"conversation,omitempty"`
+	OutputText     string             `json:"output_text"`
+	ToolCalls      []ToolCall         `json:"tool_calls,omitempty"`
+	Conversation   *ConversationState `json:"conversation,omitempty"`
+	StopReason     string             `json:"stop_reason,omitempty"`
+	ShouldContinue bool               `json:"should_continue,omitempty"`
 }
 
 func (s ConversationState) Clone() ConversationState {

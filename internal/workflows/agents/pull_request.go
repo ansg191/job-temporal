@@ -115,6 +115,10 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
+		if aiShouldContinue(result) {
+			messages = nil
+			continue
+		}
 
 		var pr prOutput
 		if err = json.Unmarshal([]byte(result.OutputText), &pr); err != nil {

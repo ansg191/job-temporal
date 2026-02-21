@@ -99,6 +99,10 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 			continue
 		}
+		if aiShouldContinue(result) {
+			messages = nil
+			continue
+		}
 
 		if enableLayoutReview {
 			// Layout review gate (resume only)

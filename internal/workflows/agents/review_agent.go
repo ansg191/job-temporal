@@ -199,7 +199,16 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 		}
 		p.conversation = result.Conversation
 
-		if !hasFunctionCalls(result.ToolCalls) {
+		if hasFunctionCalls(result.ToolCalls) {
+			pendingInput = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
+			continue
+		}
+		if aiShouldContinue(result) {
+			pendingInput = nil
+			continue
+		}
+
+		{
 			// Finished with agent loop, rebuild the PDF.
 			*p.buildRun++
 			pdfURL, err = runBuildAndUploadForReview(ctx, *p.args, *p.buildRun)
@@ -219,8 +228,6 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 			}
 			break
 		}
-
-		pendingInput = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
 	}
 
 	// Update URL in PR description.

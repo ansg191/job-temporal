@@ -57,7 +57,12 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		responseSchema = schema
 	}
 
-	buildParams := func(stablePrefixCount int) (anthropic.MessageNewParams, error) {
+	stablePrefixCount := len(state.Transcript) - len(req.Messages)
+	if stablePrefixCount < 0 {
+		stablePrefixCount = 0
+	}
+
+	buildParams := func() (anthropic.MessageNewParams, error) {
 		messages, systemBlocks, callErr := anthropicMessagesFromTranscript(state.Transcript, req.Instructions, stablePrefixCount)
 		if callErr != nil {
 			return anthropic.MessageNewParams{}, callErr
@@ -85,15 +90,14 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		return params, nil
 	}
 
-	stablePrefixCount := len(state.Transcript) - len(req.Messages)
-	if stablePrefixCount < 0 {
-		stablePrefixCount = 0
-	}
-
 	client := anthropic.NewClient()
 
 	var output strings.Builder
 	toolCalls := make([]ToolCall, 0)
+	var (
+		stopReason     anthropic.StopReason
+		shouldContinue bool
+	)
 	err := withActivityHeartbeat(
 		ctx,
 		providerHeartbeatInterval,
@@ -105,56 +109,52 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 			}
 		},
 		func() error {
-			for {
-				params, callErr := buildParams(stablePrefixCount)
-				if callErr != nil {
-					return callErr
-				}
+			params, callErr := buildParams()
+			if callErr != nil {
+				return callErr
+			}
 
-				message, callErr := client.Messages.New(ctx, params, anthropicRequestOptions(req.Model)...)
-				if callErr != nil {
-					return callErr
-				}
-				if message == nil {
-					return fmt.Errorf("anthropic returned nil message")
-				}
+			message, callErr := client.Messages.New(ctx, params, anthropicRequestOptions(req.Model)...)
+			if callErr != nil {
+				return callErr
+			}
+			if message == nil {
+				return fmt.Errorf("anthropic returned nil message")
+			}
 
-				assistant := Message{Role: RoleAssistant}
-				for _, block := range message.Content {
-					switch variant := block.AsAny().(type) {
-					case anthropic.TextBlock:
-						output.WriteString(variant.Text)
-						assistant.Content = append(assistant.Content, TextPart(variant.Text))
-					case anthropic.ThinkingBlock:
-						assistant.Content = append(assistant.Content, ThinkingPart(variant.Signature, variant.Thinking))
-					case anthropic.RedactedThinkingBlock:
-						assistant.Content = append(assistant.Content, RedactedThinkingPart(variant.Data))
-					case anthropic.ToolUseBlock:
-						b, marshalErr := json.Marshal(variant.Input)
-						if marshalErr != nil {
-							return marshalErr
-						}
-						call := ToolCall{CallID: variant.ID, Name: variant.Name, Arguments: string(b)}
-						toolCalls = append(toolCalls, call)
-						assistant.ToolCalls = append(assistant.ToolCalls, call)
-					}
-				}
-				if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
-					state.Transcript = append(state.Transcript, assistant)
-				}
-
-				if anthropicShouldContinueStopReason(message.StopReason) {
-					if len(assistant.Content) == 0 && len(assistant.ToolCalls) == 0 {
-						return fmt.Errorf("anthropic stop_reason %q returned without assistant content", message.StopReason)
-					}
-					stablePrefixCount = len(state.Transcript)
-					continue
-				}
-				if anthropicTerminalStopReason(message.StopReason) {
-					return nil
-				}
+			stopReason = message.StopReason
+			shouldContinue = anthropicShouldContinueStopReason(message.StopReason)
+			if !shouldContinue && !anthropicTerminalStopReason(message.StopReason) {
 				return fmt.Errorf("unsupported anthropic stop_reason %q", message.StopReason)
 			}
+
+			assistant := Message{Role: RoleAssistant}
+			for _, block := range message.Content {
+				switch variant := block.AsAny().(type) {
+				case anthropic.TextBlock:
+					output.WriteString(variant.Text)
+					assistant.Content = append(assistant.Content, TextPart(variant.Text))
+				case anthropic.ThinkingBlock:
+					assistant.Content = append(assistant.Content, ThinkingPart(variant.Signature, variant.Thinking))
+				case anthropic.RedactedThinkingBlock:
+					assistant.Content = append(assistant.Content, RedactedThinkingPart(variant.Data))
+				case anthropic.ToolUseBlock:
+					b, marshalErr := json.Marshal(variant.Input)
+					if marshalErr != nil {
+						return marshalErr
+					}
+					call := ToolCall{CallID: variant.ID, Name: variant.Name, Arguments: string(b)}
+					toolCalls = append(toolCalls, call)
+					assistant.ToolCalls = append(assistant.ToolCalls, call)
+				}
+			}
+			if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
+				state.Transcript = append(state.Transcript, assistant)
+			}
+			if shouldContinue && len(assistant.Content) == 0 && len(assistant.ToolCalls) == 0 {
+				return fmt.Errorf("anthropic stop_reason %q returned without assistant content", message.StopReason)
+			}
+			return nil
 		},
 	)
 	if err != nil {
@@ -162,9 +162,11 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 	}
 
 	return &Response{
-		OutputText:   output.String(),
-		ToolCalls:    toolCalls,
-		Conversation: state,
+		OutputText:     output.String(),
+		ToolCalls:      toolCalls,
+		Conversation:   state,
+		StopReason:     string(stopReason),
+		ShouldContinue: shouldContinue,
 	}, nil
 }
 
