@@ -1,0 +1,33 @@
+# CI test values for chart-testing (ct) and kind-based integration tests.
+#
+# These values point to in-cluster services set up by the CI workflow.
+# The worker is disabled because it requires valid API credentials to start.
+
+# Disable the worker in CI — it requires real API keys and external services.
+worker:
+  enabled: false
+
+# Temporal auto-setup points to the in-cluster postgres deployed by CI.
+temporal:
+  enabled: true
+  image:
+    tag: "1.27"
+
+# Pre-existing secret references — these secrets are created by the CI job
+# before installing the chart.
+existingSecret:
+  database:
+    name: "ci-db-secret"
+    databaseUrlKey: "DATABASE_URL"
+  server:
+    name: "ci-server-secret"
+    githubWebhookSecretKey: "GITHUB_WEBHOOK_SECRET"
+  temporal:
+    name: "ci-temporal-secret"
+    postgresUserKey: "POSTGRES_USER"
+    postgresPwdKey: "POSTGRES_PWD"
+    postgresSeedsKey: "POSTGRES_SEEDS"
+  worker:
+    # Worker is disabled in CI but a placeholder secret name is still required
+    # by the chart template validation.
+    name: "ci-worker-secret"

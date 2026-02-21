@@ -1,0 +1,19 @@
+{{- if .Values.triggerServer.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "job-temporal.fullname" . }}-trigger-server
+  labels:
+    {{- include "job-temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trigger-server
+spec:
+  type: {{ .Values.triggerServer.service.type }}
+  ports:
+    - port: {{ .Values.triggerServer.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "job-temporal.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: trigger-server
+{{- end }}

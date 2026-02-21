@@ -1,0 +1,65 @@
+{{- if .Values.temporalUI.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "job-temporal.fullname" . }}-temporal-ui
+  labels:
+    {{- include "job-temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "job-temporal.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal-ui
+  template:
+    metadata:
+      {{- with .Values.temporalUI.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "job-temporal.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal-ui
+    spec:
+      serviceAccountName: {{ include "job-temporal.serviceAccountName" . }}
+      {{- with .Values.temporalUI.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: temporal-ui
+          {{- with .Values.temporalUI.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.temporalUI.image.repository }}:{{ .Values.temporalUI.image.tag }}"
+          imagePullPolicy: {{ .Values.temporalUI.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ include "job-temporal.temporalAddress" . | quote }}
+            {{- if .Values.temporalUI.corsOrigins }}
+            - name: TEMPORAL_CORS_ORIGINS
+              value: {{ .Values.temporalUI.corsOrigins | quote }}
+            {{- end }}
+          {{- with .Values.temporalUI.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.temporalUI.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.temporalUI.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.temporalUI.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

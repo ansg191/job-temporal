@@ -1,0 +1,286 @@
+# Default values for job-temporal.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Override for the Temporal server address used by all services.
+# Defaults to the in-chart temporal service: <release>-temporal:7233
+temporalAddress: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-existing Kubernetes secret references.
+#
+# DO NOT put actual secret values here. Create the secrets before installing
+# the chart, then reference them by name and key below.
+#
+# Example:
+#   kubectl create secret generic job-temporal-db \
+#     --from-literal=DATABASE_URL="postgres://user:pass@host/db?sslmode=disable"
+# ─────────────────────────────────────────────────────────────────────────────
+existingSecret:
+  # Secret containing the application PostgreSQL connection string.
+  database:
+    # -- Name of the existing Kubernetes secret.
+    name: ""
+    # -- Key within the secret that holds the DATABASE_URL value.
+    databaseUrlKey: "DATABASE_URL"
+
+  # Secret containing the GitHub webhook secret for the server component.
+  server:
+    # -- Name of the existing Kubernetes secret.
+    name: ""
+    # -- Key within the secret that holds the GITHUB_WEBHOOK_SECRET value.
+    githubWebhookSecretKey: "GITHUB_WEBHOOK_SECRET"
+
+  # Secret containing credentials for the Temporal PostgreSQL database.
+  temporal:
+    # -- Name of the existing Kubernetes secret.
+    name: ""
+    # -- Key for the Temporal PostgreSQL username.
+    postgresUserKey: "POSTGRES_USER"
+    # -- Key for the Temporal PostgreSQL password.
+    postgresPwdKey: "POSTGRES_PWD"
+    # -- Key for the Temporal PostgreSQL hostname (seeds).
+    postgresSeedsKey: "POSTGRES_SEEDS"
+
+  # Secret containing all worker service credentials.
+  worker:
+    # -- Name of the existing Kubernetes secret.
+    name: ""
+    # -- Key for the Anthropic API key.
+    anthropicApiKeyKey: "ANTHROPIC_API_KEY"
+    # -- Key for the OpenAI API key.
+    openaiApiKeyKey: "OPENAI_API_KEY"
+    # -- Key for the GitHub App ID.
+    githubAppIdKey: "GITHUB_APP_ID"
+    # -- Key for the GitHub App installation ID.
+    githubInstallIdKey: "GITHUB_INSTALL_ID"
+    # -- Key for the GitHub App private key (PEM content). Mounted as a file.
+    githubAppPrivateKeyKey: "GITHUB_APP_PRIVATE_KEY"
+    # -- Key for the AWS/R2 access key ID.
+    awsAccessKeyIdKey: "AWS_ACCESS_KEY_ID"
+    # -- Key for the AWS/R2 secret access key.
+    awsSecretAccessKeyKey: "AWS_SECRET_ACCESS_KEY"
+    # -- Key for the AWS region (e.g. "auto" for Cloudflare R2).
+    awsRegionKey: "AWS_REGION"
+    # -- Key for the AWS/R2 endpoint URL.
+    awsEndpointUrlKey: "AWS_ENDPOINT_URL"
+    # -- Key for the R2 bucket name.
+    r2BucketKey: "R2_BUCKET"
+    # -- Key for the R2 public base URL.
+    r2PublicBaseUrlKey: "R2_PUBLIC_BASE_URL"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Service account
+# ─────────────────────────────────────────────────────────────────────────────
+serviceAccount:
+  # -- Whether to create a service account.
+  create: true
+  # -- Annotations to add to the service account.
+  annotations: {}
+  # -- Name override. If empty, a name is generated using the fullname template.
+  name: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# server — GitHub webhook receiver
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  # -- Enable or disable the server component.
+  enabled: true
+  # -- Number of replicas.
+  replicaCount: 1
+  image:
+    # -- Container image repository.
+    repository: ghcr.io/ansg191/job-temporal/server
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+    # -- Image tag. Defaults to the chart appVersion.
+    tag: ""
+  # -- Image pull secrets.
+  imagePullSecrets: []
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  securityContext: {}
+  service:
+    # -- Service type.
+    type: ClusterIP
+    # -- Service port.
+    port: 8080
+  # -- Resource requests and limits.
+  resources: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# triggerServer — Web UI for manual job submission
+# ─────────────────────────────────────────────────────────────────────────────
+triggerServer:
+  # -- Enable or disable the trigger-server component.
+  enabled: true
+  # -- Number of replicas.
+  replicaCount: 1
+  image:
+    # -- Container image repository.
+    repository: ghcr.io/ansg191/job-temporal/trigger-server
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+    # -- Image tag. Defaults to the chart appVersion.
+    tag: ""
+  # -- Image pull secrets.
+  imagePullSecrets: []
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  securityContext: {}
+  service:
+    # -- Service type.
+    type: ClusterIP
+    # -- Service port.
+    port: 8090
+  # -- Resource requests and limits.
+  resources: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# worker — Temporal workflow worker
+# ─────────────────────────────────────────────────────────────────────────────
+worker:
+  # -- Enable or disable the worker component.
+  enabled: true
+  # -- Number of replicas.
+  replicaCount: 1
+  image:
+    # -- Container image repository.
+    repository: ghcr.io/ansg191/job-temporal/worker
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+    # -- Image tag. Defaults to the chart appVersion.
+    tag: ""
+  # -- Image pull secrets.
+  imagePullSecrets: []
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  securityContext: {}
+  # -- Minimum interval between GitHub MCP calls (milliseconds).
+  githubMcpMinIntervalMs: "1500"
+  # -- Font paths for Typst document compilation.
+  typstFontPaths: "/usr/share/fonts:/usr/local/share/fonts"
+  # -- Path to agent configuration directory inside the container.
+  agentConfigDir: ""
+  # -- Extra environment variables to inject into the worker.
+  extraEnv: []
+  # -- Resource requests and limits.
+  resources: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# temporal — Temporal server (auto-setup)
+# ─────────────────────────────────────────────────────────────────────────────
+temporal:
+  # -- Enable or disable the in-chart Temporal server.
+  # Set to false if you are using an external Temporal server.
+  enabled: true
+  image:
+    # -- Container image repository.
+    repository: temporalio/auto-setup
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+    # -- Temporal auto-setup image tag.
+    tag: "1.27"
+  # -- Temporal database driver. Use "postgres12" for PostgreSQL >= 12.
+  db: postgres12
+  # -- PostgreSQL port for the Temporal database.
+  dbPort: "5432"
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  securityContext: {}
+  service:
+    # -- Service type.
+    type: ClusterIP
+    # -- gRPC port for the Temporal frontend service.
+    port: 7233
+  # -- Resource requests and limits.
+  resources: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# temporalUI — Temporal web dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+temporalUI:
+  # -- Enable or disable the Temporal UI.
+  enabled: true
+  image:
+    # -- Container image repository.
+    repository: temporalio/ui
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+    # -- Temporal UI image tag.
+    tag: "latest"
+  # -- CORS origins allowed for the Temporal UI.
+  corsOrigins: ""
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  securityContext: {}
+  service:
+    # -- Service type.
+    type: ClusterIP
+    # -- Service port (internal Temporal UI listens on 8080).
+    port: 8080
+  # -- Resource requests and limits.
+  resources: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — path-based routing (mirrors traefik rules in compose.yml)
+# ─────────────────────────────────────────────────────────────────────────────
+ingress:
+  # -- Enable ingress resource creation.
+  enabled: false
+  # -- Ingress class name (e.g. "nginx", "traefik").
+  className: ""
+  # -- Annotations for the ingress resource.
+  annotations: {}
+  # -- Hostname for the ingress rules.
+  host: ""
+  # -- TLS configuration.
+  tls: []
+  #  - secretName: job-temporal-tls
+  #    hosts:
+  #      - chart-example.local

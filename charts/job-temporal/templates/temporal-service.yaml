@@ -1,0 +1,19 @@
+{{- if .Values.temporal.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "job-temporal.fullname" . }}-temporal
+  labels:
+    {{- include "job-temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  type: {{ .Values.temporal.service.type }}
+  ports:
+    - port: {{ .Values.temporal.service.port }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    {{- include "job-temporal.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+{{- end }}

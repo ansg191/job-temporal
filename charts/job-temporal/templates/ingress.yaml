@@ -1,0 +1,47 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "job-temporal.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "job-temporal.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- if .Values.server.enabled }}
+          # /webhook → server (higher priority, matched first)
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          {{- end }}
+          {{- if .Values.triggerServer.enabled }}
+          # / → trigger-server (catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-trigger-server
+                port:
+                  number: {{ .Values.triggerServer.service.port }}
+          {{- end }}
+{{- end }}

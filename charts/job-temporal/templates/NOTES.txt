@@ -1,0 +1,64 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BEFORE the application will work you must create the required
+Kubernetes secrets referenced in your values:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Application database
+  kubectl create secret generic <database-secret> \
+    --from-literal=DATABASE_URL="postgres://user:pass@host/db?sslmode=disable"
+
+  # GitHub webhook secret (for the server component)
+  kubectl create secret generic <server-secret> \
+    --from-literal=GITHUB_WEBHOOK_SECRET="<your-webhook-secret>"
+
+  # Temporal database credentials
+  kubectl create secret generic <temporal-secret> \
+    --from-literal=POSTGRES_USER="temporal" \
+    --from-literal=POSTGRES_PWD="<password>" \
+    --from-literal=POSTGRES_SEEDS="<postgres-hostname>"
+
+  # Worker credentials
+  kubectl create secret generic <worker-secret> \
+    --from-literal=ANTHROPIC_API_KEY="<key>" \
+    --from-literal=OPENAI_API_KEY="<key>" \
+    --from-literal=GITHUB_APP_ID="<id>" \
+    --from-literal=GITHUB_INSTALL_ID="<id>" \
+    --from-literal=GITHUB_APP_PRIVATE_KEY="$(cat github-app.pem)" \
+    --from-literal=AWS_ACCESS_KEY_ID="<key>" \
+    --from-literal=AWS_SECRET_ACCESS_KEY="<key>" \
+    --from-literal=AWS_REGION="auto" \
+    --from-literal=AWS_ENDPOINT_URL="<r2-endpoint>" \
+    --from-literal=R2_BUCKET="<bucket>" \
+    --from-literal=R2_PUBLIC_BASE_URL="<url>"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Accessing the services
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.ingress.enabled }}
+  Ingress host: {{ .Values.ingress.host }}
+  • Webhook endpoint: http://{{ .Values.ingress.host }}/webhook
+  • Trigger UI:        http://{{ .Values.ingress.host }}/
+{{- else }}
+  No ingress is enabled. To access the services locally, use port-forward:
+
+  # GitHub webhook server (port 8080)
+  kubectl port-forward svc/{{ include "job-temporal.fullname" . }}-server 8080:8080
+
+  # Trigger UI (port 8090)
+  kubectl port-forward svc/{{ include "job-temporal.fullname" . }}-trigger-server 8090:8090
+
+  # Temporal UI (port 8080 → local 8233)
+  kubectl port-forward svc/{{ include "job-temporal.fullname" . }}-temporal-ui 8233:8080
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Run Helm tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
