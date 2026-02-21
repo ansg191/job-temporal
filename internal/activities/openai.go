@@ -30,9 +30,11 @@ type ConversationRequest struct {
 }
 
 type AIResponse struct {
-	OutputText   string                 `json:"output_text"`
-	ToolCalls    []llm.ToolCall         `json:"tool_calls,omitempty"`
-	Conversation *llm.ConversationState `json:"conversation,omitempty"`
+	OutputText     string                 `json:"output_text"`
+	ToolCalls      []llm.ToolCall         `json:"tool_calls,omitempty"`
+	Conversation   *llm.ConversationState `json:"conversation,omitempty"`
+	StopReason     string                 `json:"stop_reason,omitempty"`
+	ShouldContinue bool                   `json:"should_continue,omitempty"`
 }
 
 func GenerateTextFormat[T any](name string) *ResponseTextFormat {
@@ -83,9 +85,11 @@ func CallAI(ctx context.Context, request AIRequest) (*AIResponse, error) {
 	}
 
 	return &AIResponse{
-		OutputText:   resp.OutputText,
-		ToolCalls:    resp.ToolCalls,
-		Conversation: resp.Conversation,
+		OutputText:     resp.OutputText,
+		ToolCalls:      resp.ToolCalls,
+		Conversation:   resp.Conversation,
+		StopReason:     resp.StopReason,
+		ShouldContinue: resp.ShouldContinue,
 	}, nil
 }
 

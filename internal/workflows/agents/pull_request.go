@@ -68,10 +68,10 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 
 	messages := []llm.Message{
 		systemMessage(agentCfg.Instructions),
-		userMessage("Remote: " + req.Owner + "/" + req.Repo),
-		userMessage("Branch Name: " + req.Branch),
-		userMessage("Job description: " + req.Job),
-		userMessage("Public PDF URL (must be included in PR description): " + pdfURL),
+		userMessage(wrapLLMXML("repository", req.Owner+"/"+req.Repo)),
+		userMessage(wrapLLMXML("branch", req.Branch)),
+		userMessage(wrapLLMXML("pdf_url", pdfURL)),
+		userMessage(wrapLLMXML("job_description", req.Job)),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -113,6 +113,10 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 
 		if hasFunctionCalls(result.ToolCalls) {
 			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
+			continue
+		}
+		if aiShouldContinue(result) {
+			messages = nil
 			continue
 		}
 

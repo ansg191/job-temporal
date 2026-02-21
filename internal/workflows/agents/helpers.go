@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"time"
 
 	"go.temporal.io/sdk/workflow"
@@ -24,6 +25,10 @@ func systemMessage(content string) llm.Message {
 
 func hasFunctionCalls(calls []llm.ToolCall) bool {
 	return len(calls) > 0
+}
+
+func aiShouldContinue(resp activities.AIResponse) bool {
+	return resp.ShouldContinue
 }
 
 func createConversation(ctx workflow.Context, model string, items []llm.Message) (*llm.ConversationState, error) {
@@ -61,4 +66,8 @@ func loadAgentConfig(ctx workflow.Context, agentName string) (*config.AgentConfi
 
 func temperatureOpt(t *float64) *float64 {
 	return t
+}
+
+func wrapLLMXML(tag, content string) string {
+	return fmt.Sprintf("<%s>\n%s\n</%s>", tag, content, tag)
 }

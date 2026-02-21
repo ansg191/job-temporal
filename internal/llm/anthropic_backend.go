@@ -14,7 +14,7 @@ import (
 type anthropicBackend struct{}
 
 const (
-	anthropicDefaultMaxTokens int64 = 4096
+	anthropicDefaultMaxTokens int64 = 16384
 
 	anthropicCompactionBetaHeader   = "compact-2026-01-12"
 	anthropicCompactionEditType     = "compact_20260112"
@@ -57,7 +57,12 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		responseSchema = schema
 	}
 
-	buildParams := func(stablePrefixCount int) (anthropic.MessageNewParams, error) {
+	stablePrefixCount := len(state.Transcript) - len(req.Messages)
+	if stablePrefixCount < 0 {
+		stablePrefixCount = 0
+	}
+
+	buildParams := func() (anthropic.MessageNewParams, error) {
 		messages, systemBlocks, callErr := anthropicMessagesFromTranscript(state.Transcript, req.Instructions, stablePrefixCount)
 		if callErr != nil {
 			return anthropic.MessageNewParams{}, callErr
@@ -72,6 +77,9 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		if req.Temperature != nil {
 			params.Temperature = anthropic.Float(*req.Temperature)
 		}
+		if thinking, ok := anthropicThinkingConfig(req.Model); ok {
+			params.Thinking = thinking
+		}
 		if req.Text != nil {
 			params.OutputConfig = anthropic.OutputConfigParam{
 				Format: anthropic.JSONOutputFormatParam{
@@ -82,15 +90,14 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		return params, nil
 	}
 
-	stablePrefixCount := len(state.Transcript) - len(req.Messages)
-	if stablePrefixCount < 0 {
-		stablePrefixCount = 0
-	}
-
 	client := anthropic.NewClient()
 
 	var output strings.Builder
 	toolCalls := make([]ToolCall, 0)
+	var (
+		stopReason     anthropic.StopReason
+		shouldContinue bool
+	)
 	err := withActivityHeartbeat(
 		ctx,
 		providerHeartbeatInterval,
@@ -102,52 +109,52 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 			}
 		},
 		func() error {
-			for {
-				params, callErr := buildParams(stablePrefixCount)
-				if callErr != nil {
-					return callErr
-				}
+			params, callErr := buildParams()
+			if callErr != nil {
+				return callErr
+			}
 
-				message, callErr := client.Messages.New(ctx, params, anthropicRequestOptions(req.Model)...)
-				if callErr != nil {
-					return callErr
-				}
-				if message == nil {
-					return fmt.Errorf("anthropic returned nil message")
-				}
+			message, callErr := client.Messages.New(ctx, params, anthropicRequestOptions(req.Model)...)
+			if callErr != nil {
+				return callErr
+			}
+			if message == nil {
+				return fmt.Errorf("anthropic returned nil message")
+			}
 
-				assistant := Message{Role: RoleAssistant}
-				for _, block := range message.Content {
-					switch variant := block.AsAny().(type) {
-					case anthropic.TextBlock:
-						output.WriteString(variant.Text)
-						assistant.Content = append(assistant.Content, TextPart(variant.Text))
-					case anthropic.ToolUseBlock:
-						b, marshalErr := json.Marshal(variant.Input)
-						if marshalErr != nil {
-							return marshalErr
-						}
-						call := ToolCall{CallID: variant.ID, Name: variant.Name, Arguments: string(b)}
-						toolCalls = append(toolCalls, call)
-						assistant.ToolCalls = append(assistant.ToolCalls, call)
-					}
-				}
-				if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
-					state.Transcript = append(state.Transcript, assistant)
-				}
-
-				if anthropicShouldContinueStopReason(message.StopReason) {
-					if len(assistant.Content) == 0 && len(assistant.ToolCalls) == 0 {
-						return fmt.Errorf("anthropic stop_reason %q returned without assistant content", message.StopReason)
-					}
-					stablePrefixCount = len(state.Transcript)
-					continue
-				}
-				if anthropicTerminalStopReason(message.StopReason) {
-					return nil
-				}
+			stopReason = message.StopReason
+			shouldContinue = anthropicShouldContinueStopReason(message.StopReason)
+			if !shouldContinue && !anthropicTerminalStopReason(message.StopReason) {
 				return fmt.Errorf("unsupported anthropic stop_reason %q", message.StopReason)
 			}
+
+			assistant := Message{Role: RoleAssistant}
+			for _, block := range message.Content {
+				switch variant := block.AsAny().(type) {
+				case anthropic.TextBlock:
+					output.WriteString(variant.Text)
+					assistant.Content = append(assistant.Content, TextPart(variant.Text))
+				case anthropic.ThinkingBlock:
+					assistant.Content = append(assistant.Content, ThinkingPart(variant.Signature, variant.Thinking))
+				case anthropic.RedactedThinkingBlock:
+					assistant.Content = append(assistant.Content, RedactedThinkingPart(variant.Data))
+				case anthropic.ToolUseBlock:
+					b, marshalErr := json.Marshal(variant.Input)
+					if marshalErr != nil {
+						return marshalErr
+					}
+					call := ToolCall{CallID: variant.ID, Name: variant.Name, Arguments: string(b)}
+					toolCalls = append(toolCalls, call)
+					assistant.ToolCalls = append(assistant.ToolCalls, call)
+				}
+			}
+			if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
+				state.Transcript = append(state.Transcript, assistant)
+			}
+			if shouldContinue && len(assistant.Content) == 0 && len(assistant.ToolCalls) == 0 {
+				return fmt.Errorf("anthropic stop_reason %q returned without assistant content", message.StopReason)
+			}
+			return nil
 		},
 	)
 	if err != nil {
@@ -155,9 +162,11 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 	}
 
 	return &Response{
-		OutputText:   output.String(),
-		ToolCalls:    toolCalls,
-		Conversation: state,
+		OutputText:     output.String(),
+		ToolCalls:      toolCalls,
+		Conversation:   state,
+		StopReason:     string(stopReason),
+		ShouldContinue: shouldContinue,
 	}, nil
 }
 
@@ -204,6 +213,20 @@ func anthropicRequestOptions(model string) []option.RequestOption {
 }
 
 func anthropicSupportsCompaction(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "opus-4-6") || strings.Contains(model, "sonnet-4-6")
+}
+
+func anthropicThinkingConfig(model string) (anthropic.ThinkingConfigParamUnion, bool) {
+	if !anthropicSupportsAdaptiveThinking(model) {
+		return anthropic.ThinkingConfigParamUnion{}, false
+	}
+
+	adaptive := anthropic.NewThinkingConfigAdaptiveParam()
+	return anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive}, true
+}
+
+func anthropicSupportsAdaptiveThinking(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.Contains(model, "opus-4-6") || strings.Contains(model, "sonnet-4-6")
 }
@@ -255,6 +278,7 @@ func anthropicMessagesFromTranscript(
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(toolCall.CallID, args, toolCall.Name))
 			}
+			blocks = ensureAnthropicAssistantMessageEnding(blocks)
 			if len(blocks) == 0 {
 				continue
 			}
@@ -292,11 +316,33 @@ func anthropicContentBlocksFromParts(parts []ContentPart) ([]anthropic.ContentBl
 			blocks = append(blocks, anthropic.NewTextBlock(part.Text))
 		case ContentTypeImageURL:
 			blocks = append(blocks, anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: part.ImageURL}))
+		case ContentTypeThinking:
+			if strings.TrimSpace(part.Signature) == "" {
+				return nil, fmt.Errorf("anthropic thinking content block missing signature")
+			}
+			blocks = append(blocks, anthropic.NewThinkingBlock(part.Signature, part.Thinking))
+		case ContentTypeRedactedThinking:
+			if strings.TrimSpace(part.Data) == "" {
+				return nil, fmt.Errorf("anthropic redacted thinking content block missing data")
+			}
+			blocks = append(blocks, anthropic.NewRedactedThinkingBlock(part.Data))
 		default:
 			return nil, fmt.Errorf("unsupported anthropic content type %q", part.Type)
 		}
 	}
 	return blocks, nil
+}
+
+func ensureAnthropicAssistantMessageEnding(blocks []anthropic.ContentBlockParamUnion) []anthropic.ContentBlockParamUnion {
+	if len(blocks) == 0 {
+		return blocks
+	}
+	last := blocks[len(blocks)-1]
+	if last.OfThinking == nil && last.OfRedactedThinking == nil {
+		return blocks
+	}
+	// Anthropic rejects assistant messages that end with thinking blocks.
+	return append(blocks, anthropic.NewTextBlock(""))
 }
 
 func anthropicToolsFromCanonical(tools []ToolDefinition) []anthropic.ToolUnionParam {
@@ -326,19 +372,29 @@ func setAnthropicCacheControlOnLastContentBlock(msg *anthropic.MessageParam) {
 	if msg == nil || len(msg.Content) == 0 {
 		return
 	}
-	last := &msg.Content[len(msg.Content)-1]
 	cacheControl := anthropic.NewCacheControlEphemeralParam()
-	switch {
-	case last.OfText != nil:
-		last.OfText.CacheControl = cacheControl
-	case last.OfImage != nil:
-		last.OfImage.CacheControl = cacheControl
-	case last.OfDocument != nil:
-		last.OfDocument.CacheControl = cacheControl
-	case last.OfToolResult != nil:
-		last.OfToolResult.CacheControl = cacheControl
-	case last.OfToolUse != nil:
-		last.OfToolUse.CacheControl = cacheControl
+	for i := len(msg.Content) - 1; i >= 0; i-- {
+		block := &msg.Content[i]
+		switch {
+		case block.OfText != nil:
+			if block.OfText.Text == "" {
+				continue
+			}
+			block.OfText.CacheControl = cacheControl
+			return
+		case block.OfImage != nil:
+			block.OfImage.CacheControl = cacheControl
+			return
+		case block.OfDocument != nil:
+			block.OfDocument.CacheControl = cacheControl
+			return
+		case block.OfToolResult != nil:
+			block.OfToolResult.CacheControl = cacheControl
+			return
+		case block.OfToolUse != nil:
+			block.OfToolUse.CacheControl = cacheControl
+			return
+		}
 	}
 }
 

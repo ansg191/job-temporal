@@ -78,24 +78,37 @@ func analyzeLayoutReview(
 		userMessageParts(content),
 	}
 
-	var result activities.AIResponse
-	err := workflow.ExecuteActivity(
-		withCallAIActivityOptions(ctx),
-		activities.CallAI,
-		activities.AIRequest{
-			Model:       model,
-			Input:       input,
-			Text:        activities.LayoutReviewTextFormat,
-			Temperature: temperatureOpt(temperature),
-		},
-	).Get(ctx, &result)
-	if err != nil {
-		return nil, err
-	}
-
+	pendingInput := input
+	var conversation *llm.ConversationState
 	var output activities.ReviewPDFLayoutOutput
-	if err = json.Unmarshal([]byte(result.OutputText), &output); err != nil {
-		return nil, fmt.Errorf("failed to parse layout review output: %w", err)
+	for {
+		var result activities.AIResponse
+		err := workflow.ExecuteActivity(
+			withCallAIActivityOptions(ctx),
+			activities.CallAI,
+			activities.AIRequest{
+				Model:        model,
+				Input:        pendingInput,
+				Text:         activities.LayoutReviewTextFormat,
+				Temperature:  temperatureOpt(temperature),
+				Conversation: conversation,
+			},
+		).Get(ctx, &result)
+		if err != nil {
+			return nil, err
+		}
+		conversation = result.Conversation
+		if hasFunctionCalls(result.ToolCalls) {
+			return nil, fmt.Errorf("layout review returned unexpected tool calls")
+		}
+		if aiShouldContinue(result) {
+			pendingInput = nil
+			continue
+		}
+		if err = json.Unmarshal([]byte(result.OutputText), &output); err != nil {
+			return nil, fmt.Errorf("failed to parse layout review output: %w", err)
+		}
+		break
 	}
 
 	output.CheckedPages = make([]int, 0, len(pages))

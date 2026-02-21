@@ -46,9 +46,9 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 
 	messages := []llm.Message{
 		systemMessage(agentCfg.Instructions),
-		userMessage("Remote: " + req.Owner + "/" + req.Repo),
-		userMessage("Branch Name: " + req.BranchName),
-		userMessage("Job Application:\n" + req.Job),
+		userMessage(wrapLLMXML("job_description", req.Job)),
+		userMessage(wrapLLMXML("repository", req.Owner+"/"+req.Repo)),
+		userMessage(wrapLLMXML("branch", req.BranchName)),
 	}
 
 	ao := workflow.ActivityOptions{
@@ -97,6 +97,10 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 
 		if hasFunctionCalls(result.ToolCalls) {
 			messages = tools.ProcessToolCalls(ctx, result.ToolCalls, dispatcher)
+			continue
+		}
+		if aiShouldContinue(result) {
+			messages = nil
 			continue
 		}
 
