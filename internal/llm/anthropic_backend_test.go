@@ -314,9 +314,11 @@ func TestAnthropicMessagesFromTranscript_ThinkingTextAndToolUseOrder(t *testing.
 	}
 }
 
-func TestAnthropicMessagesFromTranscript_AppendsTerminalTextAfterTrailingThinking(t *testing.T) {
+func TestAnthropicMessagesFromTranscript_TrailingThinkingBlockNotAugmented(t *testing.T) {
 	t.Parallel()
 
+	// A mid-conversation assistant message ending with a thinking block should not
+	// have an empty text appended; the following user message makes it valid.
 	transcript := []Message{
 		{
 			Role: RoleAssistant,
@@ -325,17 +327,20 @@ func TestAnthropicMessagesFromTranscript_AppendsTerminalTextAfterTrailingThinkin
 				ThinkingPart("sig-123", "reasoning"),
 			},
 		},
+		TextMessage(RoleUser, "Please Continue..."),
 	}
 
-	msgs, _, err := anthropicMessagesFromTranscript(transcript, "", 1)
+	msgs, _, err := anthropicMessagesFromTranscript(transcript, "", 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (assistant + user), got %d", len(msgs))
 	}
-	if len(msgs[0].Content) != 3 {
-		t.Fatalf("expected trailing thinking block to be preserved with terminal text, got %d blocks", len(msgs[0].Content))
+	// The assistant message must contain exactly the original 2 blocks — no empty
+	// terminal text should be silently injected (empty blocks cause Anthropic 400s).
+	if len(msgs[0].Content) != 2 {
+		t.Fatalf("expected 2 assistant content blocks (text + thinking), got %d", len(msgs[0].Content))
 	}
 	if msgs[0].Content[0].OfText == nil {
 		t.Fatalf("expected first block to be text")
@@ -343,36 +348,45 @@ func TestAnthropicMessagesFromTranscript_AppendsTerminalTextAfterTrailingThinkin
 	if msgs[0].Content[1].OfThinking == nil {
 		t.Fatalf("expected second block to be thinking")
 	}
-	if msgs[0].Content[2].OfText == nil || msgs[0].Content[2].OfText.Text != "" {
-		t.Fatalf("expected final terminal text block to be empty text")
+	// The continuation user message must be non-empty so Anthropic accepts it.
+	if msgs[1].Content[0].OfText == nil || msgs[1].Content[0].OfText.Text == "" {
+		t.Fatalf("expected non-empty user continuation message")
 	}
 }
 
-func TestAnthropicMessagesFromTranscript_PreservesThinkingOnlyAssistantTurn(t *testing.T) {
+func TestAnthropicMessagesFromTranscript_ThinkingOnlyAssistantFollowedByContinuationUser(t *testing.T) {
 	t.Parallel()
 
+	// Regression test for issue #16: when the model pauses/hits max_tokens with only
+	// thinking content, the continuation user message ("Please Continue...") must be
+	// non-empty and the assistant message must NOT have an empty text block injected
+	// (empty text blocks cause Anthropic to return 400 "text content blocks must be non-empty").
 	transcript := []Message{
+		TextMessage(RoleUser, "do something"),
 		{
 			Role:    RoleAssistant,
 			Content: []ContentPart{ThinkingPart("sig-123", "reasoning")},
 		},
+		TextMessage(RoleUser, "Please Continue..."),
 	}
 
-	msgs, _, err := anthropicMessagesFromTranscript(transcript, "", 1)
+	msgs, _, err := anthropicMessagesFromTranscript(transcript, "", 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected thinking-only assistant turn to be preserved, got %d messages", len(msgs))
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
 	}
-	if len(msgs[0].Content) != 2 {
-		t.Fatalf("expected thinking + terminal empty text blocks, got %d", len(msgs[0].Content))
+	// Assistant message: only the thinking block, no injected empty text.
+	if len(msgs[1].Content) != 1 {
+		t.Fatalf("expected 1 assistant content block (thinking only, no empty text), got %d", len(msgs[1].Content))
 	}
-	if msgs[0].Content[0].OfThinking == nil {
-		t.Fatalf("expected first block to be thinking")
+	if msgs[1].Content[0].OfThinking == nil {
+		t.Fatalf("expected thinking block")
 	}
-	if msgs[0].Content[1].OfText == nil || msgs[0].Content[1].OfText.Text != "" {
-		t.Fatalf("expected second block to be terminal empty text")
+	// Continuation user message must be non-empty.
+	if msgs[2].Content[0].OfText == nil || msgs[2].Content[0].OfText.Text == "" {
+		t.Fatalf("expected non-empty continuation user message, got empty text block")
 	}
 }
 

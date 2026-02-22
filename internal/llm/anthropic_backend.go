@@ -258,7 +258,7 @@ func anthropicMessagesFromTranscript(
 				return nil, nil, err
 			}
 			if len(blocks) == 0 {
-				blocks = append(blocks, anthropic.NewTextBlock(""))
+				return nil, nil, fmt.Errorf("anthropic user message missing content")
 			}
 			messages = append(messages, anthropic.NewUserMessage(blocks...))
 			if idx < stablePrefixCount {
@@ -278,7 +278,6 @@ func anthropicMessagesFromTranscript(
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(toolCall.CallID, args, toolCall.Name))
 			}
-			blocks = ensureAnthropicAssistantMessageEnding(blocks)
 			if len(blocks) == 0 {
 				continue
 			}
@@ -331,18 +330,6 @@ func anthropicContentBlocksFromParts(parts []ContentPart) ([]anthropic.ContentBl
 		}
 	}
 	return blocks, nil
-}
-
-func ensureAnthropicAssistantMessageEnding(blocks []anthropic.ContentBlockParamUnion) []anthropic.ContentBlockParamUnion {
-	if len(blocks) == 0 {
-		return blocks
-	}
-	last := blocks[len(blocks)-1]
-	if last.OfThinking == nil && last.OfRedactedThinking == nil {
-		return blocks
-	}
-	// Anthropic rejects assistant messages that end with thinking blocks.
-	return append(blocks, anthropic.NewTextBlock(""))
 }
 
 func anthropicToolsFromCanonical(tools []ToolDefinition) []anthropic.ToolUnionParam {

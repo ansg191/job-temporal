@@ -204,7 +204,7 @@ func (p *reviewSignalProcessor) process(ctx workflow.Context, reviewSignal *webh
 			continue
 		}
 		if aiShouldContinue(result) {
-			pendingInput = nil
+			pendingInput = []llm.Message{userMessage(continuationMessage)}
 			continue
 		}
 
