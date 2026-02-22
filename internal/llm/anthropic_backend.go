@@ -258,7 +258,7 @@ func anthropicMessagesFromTranscript(
 				return nil, nil, err
 			}
 			if len(blocks) == 0 {
-				blocks = append(blocks, anthropic.NewTextBlock(""))
+				return nil, nil, fmt.Errorf("anthropic user message missing content")
 			}
 			messages = append(messages, anthropic.NewUserMessage(blocks...))
 			if idx < stablePrefixCount {
