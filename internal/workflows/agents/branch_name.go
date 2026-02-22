@@ -78,7 +78,7 @@ func BranchNameAgent(ctx workflow.Context, req BranchNameAgentRequest) (string, 
 			continue
 		}
 		if aiShouldContinue(result) {
-			messages = nil
+			messages = []llm.Message{userMessage(continuationMessage)}
 			continue
 		}
 

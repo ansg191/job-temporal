@@ -11,6 +11,8 @@ import (
 	"github.com/ansg191/job-temporal/internal/llm"
 )
 
+const continuationMessage = "Please Continue..."
+
 func userMessage(content string) llm.Message {
 	return llm.TextMessage(llm.RoleUser, content)
 }

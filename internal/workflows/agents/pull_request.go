@@ -116,7 +116,7 @@ func PullRequestAgent(ctx workflow.Context, req PullRequestAgentRequest) (int, e
 			continue
 		}
 		if aiShouldContinue(result) {
-			messages = nil
+			messages = []llm.Message{userMessage(continuationMessage)}
 			continue
 		}
 

@@ -100,7 +100,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			continue
 		}
 		if aiShouldContinue(result) {
-			messages = nil
+			messages = []llm.Message{userMessage(continuationMessage)}
 			continue
 		}
 

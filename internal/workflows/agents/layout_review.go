@@ -102,7 +102,7 @@ func analyzeLayoutReview(
 			return nil, fmt.Errorf("layout review returned unexpected tool calls")
 		}
 		if aiShouldContinue(result) {
-			pendingInput = nil
+			pendingInput = []llm.Message{userMessage(continuationMessage)}
 			continue
 		}
 		if err = json.Unmarshal([]byte(result.OutputText), &output); err != nil {
