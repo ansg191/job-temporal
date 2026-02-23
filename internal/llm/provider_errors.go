@@ -2,7 +2,10 @@ package llm
 
 import (
 	"errors"
+	"log/slog"
+	"strconv"
 	"strings"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"go.temporal.io/sdk/temporal"
@@ -24,7 +27,34 @@ func ClassifyAnthropicError(err error) error {
 			err,
 		)
 	}
+	if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
+		// Rate limited
+		// See: https://platform.claude.com/docs/en/api/rate-limits
+		retryAfter := apiErr.Response.Header.Get("Retry-After")
+		if retryAfter == "" {
+			return temporal.NewApplicationError("anthropic rate limited", "AnthropicRateLimitedError", err)
+		}
+		return temporal.NewApplicationErrorWithOptions(
+			"anthropic rate limited, retry after "+retryAfter,
+			"AnthropicRateLimitedError",
+			temporal.ApplicationErrorOptions{
+				NonRetryable:   false,
+				Cause:          err,
+				NextRetryDelay: parseRetryAfter(retryAfter),
+			},
+		)
+	}
 	return err
+}
+
+func parseRetryAfter(after string) time.Duration {
+	seconds, err := strconv.ParseInt(after, 10, 64)
+	if err != nil {
+		// Not handling date retry-afters for now.
+		slog.Error("failed to parse retry-after header", "after", after, "err", err)
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func ClassifyProviderError(provider string, err error) error {
