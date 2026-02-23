@@ -13,39 +13,40 @@ import (
 
 func ClassifyAnthropicError(err error) error {
 	var apiErr *anthropic.Error
-	if errors.As(err, &apiErr) && apiErr.StatusCode == 400 {
-		msg := "anthropic invalid request"
-		if apiErr.RequestID != "" {
-			msg += " (request_id: " + apiErr.RequestID + ")"
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == 400 {
+			msg := "anthropic invalid request"
+			if apiErr.RequestID != "" {
+				msg += " (request_id: " + apiErr.RequestID + ")"
+			}
+			if raw := strings.TrimSpace(apiErr.RawJSON()); raw != "" {
+				msg += ": " + raw
+			}
+			return temporal.NewNonRetryableApplicationError(
+				msg,
+				"AnthropicInvalidRequestError",
+				err,
+			)
+		} else if apiErr.StatusCode == 429 {
+			// Rate limited
+			// See: https://platform.claude.com/docs/en/api/rate-limits
+			if apiErr.Response == nil {
+				return temporal.NewApplicationErrorWithCause("anthropic rate limited", "AnthropicRateLimitedError", err)
+			}
+			retryAfter := apiErr.Response.Header.Get("Retry-After")
+			if retryAfter == "" {
+				return temporal.NewApplicationErrorWithCause("anthropic rate limited", "AnthropicRateLimitedError", err)
+			}
+			return temporal.NewApplicationErrorWithOptions(
+				"anthropic rate limited, retry after "+retryAfter,
+				"AnthropicRateLimitedError",
+				temporal.ApplicationErrorOptions{
+					NonRetryable:   false,
+					Cause:          err,
+					NextRetryDelay: parseRetryAfter(retryAfter),
+				},
+			)
 		}
-		if raw := strings.TrimSpace(apiErr.RawJSON()); raw != "" {
-			msg += ": " + raw
-		}
-		return temporal.NewNonRetryableApplicationError(
-			msg,
-			"AnthropicInvalidRequestError",
-			err,
-		)
-	}
-	if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
-		// Rate limited
-		// See: https://platform.claude.com/docs/en/api/rate-limits
-		if apiErr.Response == nil {
-			return temporal.NewApplicationErrorWithCause("anthropic rate limited", "AnthropicRateLimitedError", err)
-		}
-		retryAfter := apiErr.Response.Header.Get("Retry-After")
-		if retryAfter == "" {
-			return temporal.NewApplicationErrorWithCause("anthropic rate limited", "AnthropicRateLimitedError", err)
-		}
-		return temporal.NewApplicationErrorWithOptions(
-			"anthropic rate limited, retry after "+retryAfter,
-			"AnthropicRateLimitedError",
-			temporal.ApplicationErrorOptions{
-				NonRetryable:   false,
-				Cause:          err,
-				NextRetryDelay: parseRetryAfter(retryAfter),
-			},
-		)
 	}
 	return err
 }
