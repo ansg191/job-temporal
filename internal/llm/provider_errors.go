@@ -14,7 +14,8 @@ import (
 func ClassifyAnthropicError(err error) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode == 400 {
+		switch apiErr.StatusCode {
+		case 400:
 			msg := "anthropic invalid request"
 			if apiErr.RequestID != "" {
 				msg += " (request_id: " + apiErr.RequestID + ")"
@@ -27,7 +28,7 @@ func ClassifyAnthropicError(err error) error {
 				"AnthropicInvalidRequestError",
 				err,
 			)
-		} else if apiErr.StatusCode == 429 {
+		case 429:
 			// Rate limited
 			// See: https://platform.claude.com/docs/en/api/rate-limits
 			if apiErr.Response == nil {
