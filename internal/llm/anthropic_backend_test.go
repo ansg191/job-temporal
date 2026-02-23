@@ -189,6 +189,34 @@ func TestClassifyAnthropicError_429WithRetryAfterSetsNextRetryDelay(t *testing.T
 	}
 }
 
+func TestClassifyAnthropicError_429WithNilResponse(t *testing.T) {
+	t.Parallel()
+
+	in := &anthropic.Error{
+		StatusCode: 429,
+		Response:   nil,
+	}
+
+	out := ClassifyAnthropicError(in)
+
+	var appErr *temporal.ApplicationError
+	if !errors.As(out, &appErr) {
+		t.Fatalf("expected application error, got %T", out)
+	}
+	if appErr.NonRetryable() {
+		t.Fatalf("expected retryable application error")
+	}
+	if appErr.Type() != "AnthropicRateLimitedError" {
+		t.Fatalf("expected AnthropicRateLimitedError, got %q", appErr.Type())
+	}
+	if appErr.NextRetryDelay() != 0 {
+		t.Fatalf("expected zero next retry delay when response is nil, got %s", appErr.NextRetryDelay())
+	}
+	if !errors.Is(out, in) {
+		t.Fatalf("expected wrapped cause to include original error")
+	}
+}
+
 func TestParseRetryAfter(t *testing.T) {
 	t.Parallel()
 
