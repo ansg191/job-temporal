@@ -2,7 +2,9 @@ package llm
 
 import (
 	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"go.temporal.io/sdk/temporal"
@@ -129,6 +131,84 @@ func TestClassifyAnthropicError_400IsNonRetryable(t *testing.T) {
 	}
 	if appErr.Type() != "AnthropicInvalidRequestError" {
 		t.Fatalf("expected AnthropicInvalidRequestError, got %q", appErr.Type())
+	}
+}
+
+func TestClassifyAnthropicError_429WithoutRetryAfterIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	in := &anthropic.Error{
+		StatusCode: 429,
+		Response:   &http.Response{Header: http.Header{}},
+	}
+	out := ClassifyAnthropicError(in)
+
+	var appErr *temporal.ApplicationError
+	if !errors.As(out, &appErr) {
+		t.Fatalf("expected application error, got %T", out)
+	}
+	if appErr.NonRetryable() {
+		t.Fatalf("expected retryable application error")
+	}
+	if appErr.Type() != "AnthropicRateLimitedError" {
+		t.Fatalf("expected AnthropicRateLimitedError, got %q", appErr.Type())
+	}
+	if appErr.NextRetryDelay() != 0 {
+		t.Fatalf("expected zero next retry delay when retry-after missing, got %s", appErr.NextRetryDelay())
+	}
+}
+
+func TestClassifyAnthropicError_429WithRetryAfterSetsNextRetryDelay(t *testing.T) {
+	t.Parallel()
+
+	in := &anthropic.Error{
+		StatusCode: 429,
+		Response: &http.Response{
+			Header: http.Header{
+				"Retry-After": []string{"7"},
+			},
+		},
+	}
+	out := ClassifyAnthropicError(in)
+
+	var appErr *temporal.ApplicationError
+	if !errors.As(out, &appErr) {
+		t.Fatalf("expected application error, got %T", out)
+	}
+	if appErr.NonRetryable() {
+		t.Fatalf("expected retryable application error")
+	}
+	if appErr.Type() != "AnthropicRateLimitedError" {
+		t.Fatalf("expected AnthropicRateLimitedError, got %q", appErr.Type())
+	}
+	if appErr.NextRetryDelay() != 7*time.Second {
+		t.Fatalf("expected next retry delay 7s, got %s", appErr.NextRetryDelay())
+	}
+	if !errors.Is(out, in) {
+		t.Fatalf("expected wrapped cause to include original error")
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		after string
+		want  time.Duration
+	}{
+		{name: "seconds", after: "11", want: 11 * time.Second},
+		{name: "invalid", after: "not-a-number", want: 0},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseRetryAfter(tc.after); got != tc.want {
+				t.Fatalf("parseRetryAfter(%q) = %s, want %s", tc.after, got, tc.want)
+			}
+		})
 	}
 }
 
