@@ -32,7 +32,7 @@ func ClassifyAnthropicError(err error) error {
 		// See: https://platform.claude.com/docs/en/api/rate-limits
 		retryAfter := apiErr.Response.Header.Get("Retry-After")
 		if retryAfter == "" {
-			return temporal.NewApplicationError("anthropic rate limited", "AnthropicRateLimitedError", err)
+			return temporal.NewApplicationErrorWithCause("anthropic rate limited", "AnthropicRateLimitedError", err)
 		}
 		return temporal.NewApplicationErrorWithOptions(
 			"anthropic rate limited, retry after "+retryAfter,
