@@ -3,6 +3,7 @@ package llm
 import (
 	"errors"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ func ClassifyAnthropicError(err error) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
-		case 400:
+		case http.StatusBadRequest:
 			msg := "anthropic invalid request"
 			if apiErr.RequestID != "" {
 				msg += " (request_id: " + apiErr.RequestID + ")"
@@ -28,7 +29,7 @@ func ClassifyAnthropicError(err error) error {
 				"AnthropicInvalidRequestError",
 				err,
 			)
-		case 429:
+		case http.StatusTooManyRequests:
 			// Rate limited
 			// See: https://platform.claude.com/docs/en/api/rate-limits
 			if apiErr.Response == nil {

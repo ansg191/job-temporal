@@ -3,6 +3,7 @@ package llm
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,129 @@ func TestAnthropicToolSchemaAlwaysIncludesObjectType(t *testing.T) {
 	}
 }
 
+func TestAnthropicToolSchema_StripsUnsupportedIntegerConstraints(t *testing.T) {
+	t.Parallel()
+
+	schema := anthropicToolSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"page_start": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"maximum":     10,
+				"description": "start page",
+			},
+		},
+		"required": []string{"page_start"},
+	})
+
+	props, ok := schema.Properties.(map[string]any)
+	if !ok {
+		t.Fatalf("expected properties map, got %T", schema.Properties)
+	}
+	pageStart, ok := props["page_start"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected page_start schema map, got %T", props["page_start"])
+	}
+	if _, ok := pageStart["minimum"]; ok {
+		t.Fatalf("expected minimum to be removed: %#v", pageStart)
+	}
+	if _, ok := pageStart["maximum"]; ok {
+		t.Fatalf("expected maximum to be removed: %#v", pageStart)
+	}
+	description, _ := pageStart["description"].(string)
+	if !strings.Contains(description, "start page") {
+		t.Fatalf("expected original description to be preserved, got %q", description)
+	}
+	if !strings.Contains(description, "{maximum: 10, minimum: 1}") {
+		t.Fatalf("expected removed constraints to be appended to description, got %q", description)
+	}
+}
+
+func TestSanitizeAnthropicSchemaMap_RecursivelyStripsUnsupportedIntegerConstraints(t *testing.T) {
+	t.Parallel()
+
+	schema := map[string]any{
+		"type": "object",
+		"$defs": map[string]any{
+			"Range": map[string]any{
+				"type":        "integer",
+				"minimum":     2,
+				"description": "range",
+			},
+		},
+		"properties": map[string]any{
+			"count": map[string]any{
+				"type":    "integer",
+				"minimum": 1,
+			},
+			"values": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type":    "integer",
+					"minimum": 3,
+				},
+			},
+			"choice": map[string]any{
+				"anyOf": []any{
+					map[string]any{
+						"type":    "integer",
+						"minimum": 4,
+					},
+					map[string]any{
+						"oneOf": []any{
+							map[string]any{
+								"type":    "integer",
+								"minimum": 5,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	sanitized := sanitizeAnthropicSchemaMap(schema)
+	assertNoUnsupportedIntegerConstraints(t, sanitized)
+
+	defs, _ := sanitized["$defs"].(map[string]any)
+	rangeDef, _ := defs["Range"].(map[string]any)
+	rangeDesc, _ := rangeDef["description"].(string)
+	if !strings.Contains(rangeDesc, "{minimum: 2}") {
+		t.Fatalf("expected defs integer constraint summary in description, got %q", rangeDesc)
+	}
+}
+
+func TestSanitizeAnthropicSchemaMap_SanitizesOutputSchema(t *testing.T) {
+	t.Parallel()
+
+	outputSchema, err := toSchemaMap(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"score": map[string]any{
+				"type":        "integer",
+				"minimum":     0,
+				"description": "final score",
+			},
+		},
+		"required": []string{"score"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected toSchemaMap error: %v", err)
+	}
+
+	sanitized := sanitizeAnthropicSchemaMap(outputSchema)
+	props, _ := sanitized["properties"].(map[string]any)
+	score, _ := props["score"].(map[string]any)
+	if _, ok := score["minimum"]; ok {
+		t.Fatalf("expected minimum removed from output schema integer property: %#v", score)
+	}
+	desc, _ := score["description"].(string)
+	if !strings.Contains(desc, "final score") || !strings.Contains(desc, "{minimum: 0}") {
+		t.Fatalf("expected output schema description to preserve constraints, got %q", desc)
+	}
+}
+
 func TestAnthropicToolsFromCanonical_CachesLastTool(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +210,29 @@ func TestAnthropicToolsFromCanonical_CachesLastTool(t *testing.T) {
 	}
 	if string(got[1].OfTool.CacheControl.Type) != "ephemeral" {
 		t.Fatalf("expected cache control on last tool")
+	}
+}
+
+func assertNoUnsupportedIntegerConstraints(t *testing.T, node any) {
+	t.Helper()
+
+	switch typed := node.(type) {
+	case map[string]any:
+		typeName, _ := typed["type"].(string)
+		if typeName == "integer" {
+			for _, key := range anthropicUnsupportedIntegerSchemaKeys {
+				if _, ok := typed[key]; ok {
+					t.Fatalf("unexpected unsupported integer key %q in %#v", key, typed)
+				}
+			}
+		}
+		for _, value := range typed {
+			assertNoUnsupportedIntegerConstraints(t, value)
+		}
+	case []any:
+		for _, value := range typed {
+			assertNoUnsupportedIntegerConstraints(t, value)
+		}
 	}
 }
 

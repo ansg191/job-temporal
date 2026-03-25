@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -20,6 +21,14 @@ const (
 	anthropicCompactionEditType     = "compact_20260112"
 	anthropicCompactionTriggerValue = int64(150000)
 )
+
+var anthropicUnsupportedIntegerSchemaKeys = []string{
+	"exclusiveMaximum",
+	"exclusiveMinimum",
+	"maximum",
+	"minimum",
+	"multipleOf",
+}
 
 func (b *anthropicBackend) CreateConversation(_ context.Context, req ConversationRequest) (*ConversationState, error) {
 	return &ConversationState{
@@ -54,7 +63,7 @@ func (b *anthropicBackend) Generate(ctx context.Context, req Request) (*Response
 		if err != nil {
 			return nil, err
 		}
-		responseSchema = schema
+		responseSchema = sanitizeAnthropicSchemaMap(schema)
 	}
 
 	stablePrefixCount := len(state.Transcript) - len(req.Messages)
@@ -392,10 +401,11 @@ func anthropicToolSchema(parameters map[string]any) anthropic.ToolInputSchemaPar
 	if len(parameters) == 0 {
 		return schema
 	}
-	schema.Properties = parameters["properties"]
-	schema.Required = toRequiredStrings(parameters["required"])
+	sanitizedParameters := sanitizeAnthropicSchemaMap(parameters)
+	schema.Properties = sanitizedParameters["properties"]
+	schema.Required = toRequiredStrings(sanitizedParameters["required"])
 	extra := make(map[string]any)
-	for key, value := range parameters {
+	for key, value := range sanitizedParameters {
 		if key == "type" || key == "properties" || key == "required" {
 			continue
 		}
@@ -405,6 +415,76 @@ func anthropicToolSchema(parameters map[string]any) anthropic.ToolInputSchemaPar
 		schema.ExtraFields = extra
 	}
 	return schema
+}
+
+func sanitizeAnthropicSchemaMap(schema map[string]any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	sanitized := sanitizeAnthropicSchemaValue(schema)
+	asMap, _ := sanitized.(map[string]any)
+	return asMap
+}
+
+func sanitizeAnthropicSchemaValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return sanitizeAnthropicSchemaObject(typed)
+	case []any:
+		sanitized := make([]any, 0, len(typed))
+		for _, item := range typed {
+			sanitized = append(sanitized, sanitizeAnthropicSchemaValue(item))
+		}
+		return sanitized
+	default:
+		return value
+	}
+}
+
+func sanitizeAnthropicSchemaObject(schema map[string]any) map[string]any {
+	sanitized := make(map[string]any, len(schema))
+	for key, value := range schema {
+		sanitized[key] = sanitizeAnthropicSchemaValue(value)
+	}
+
+	schemaType, _ := sanitized["type"].(string)
+	if schemaType != "integer" {
+		return sanitized
+	}
+
+	constraints := make(map[string]any)
+	for _, key := range anthropicUnsupportedIntegerSchemaKeys {
+		if value, ok := sanitized[key]; ok {
+			constraints[key] = value
+			delete(sanitized, key)
+		}
+	}
+	if len(constraints) == 0 {
+		return sanitized
+	}
+
+	sanitized["description"] = appendAnthropicSchemaConstraintsToDescription(sanitized["description"], constraints)
+	return sanitized
+}
+
+func appendAnthropicSchemaConstraintsToDescription(existing any, constraints map[string]any) string {
+	keys := make([]string, 0, len(constraints))
+	for key := range constraints {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s: %v", key, constraints[key]))
+	}
+	constraintSummary := "{" + strings.Join(parts, ", ") + "}"
+
+	description, _ := existing.(string)
+	if description == "" {
+		return constraintSummary
+	}
+	return description + "\n\n" + constraintSummary
 }
 
 func toRequiredStrings(value any) []string {
