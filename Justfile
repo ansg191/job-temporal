@@ -160,7 +160,7 @@ docker-build-all: (docker-build "server") (docker-build "trigger-server") (docke
 
 # Print the current ngrok tunnel URL (requires dev stack running)
 ngrok-url:
-    @curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4
+    @curl -sf http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'
 
 # Open the ngrok inspection UI
 ngrok-ui:
@@ -171,8 +171,7 @@ ngrok-webhook:
     #!/usr/bin/env bash
     set -euo pipefail
     # 1. Grab the public tunnel URL from the ngrok local API
-    NGROK_URL=$(curl -sf http://localhost:4040/api/tunnels \
-        | grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4)
+    NGROK_URL=$(curl -sf http://localhost:4040/api/tunnels | jq -re '.tunnels[0].public_url')
     if [ -z "${NGROK_URL:-}" ]; then
         echo "error: no ngrok tunnel found — is 'just dev' running?" >&2
         exit 1
