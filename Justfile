@@ -125,9 +125,9 @@ down-v:
 dev *ARGS:
     docker compose -f compose.yml -f compose.dev.yml up --build --watch {{ ARGS }}
 
-# Start dev environment in detached mode
+# Start dev environment detached (no file-watch; use 'just dev' for watch mode)
 dev-d *ARGS:
-    docker compose -f compose.yml -f compose.dev.yml up --build --watch -d {{ ARGS }}
+    docker compose -f compose.yml -f compose.dev.yml up --build -d {{ ARGS }}
 
 # Rebuild and restart a specific dev service (e.g., just dev-restart server)
 dev-restart SERVICE:
