@@ -3,6 +3,7 @@ config.yaml
 *.pem
 .idea/
 .env
+bin/
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,macos,windows,linux,intellij+all,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,macos,windows,linux,intellij+all,visualstudiocode
