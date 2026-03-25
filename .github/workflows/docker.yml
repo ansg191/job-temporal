@@ -34,11 +34,11 @@ jobs:
       matrix:
         include:
           - image: server
-            dockerfile: server.Dockerfile
+            dockerfile: deploy/server.Dockerfile
           - image: trigger-server
-            dockerfile: trigger-server.Dockerfile
+            dockerfile: deploy/trigger-server.Dockerfile
           - image: worker
-            dockerfile: worker.Dockerfile
+            dockerfile: deploy/worker.Dockerfile
 
     steps:
       - name: Checkout repository

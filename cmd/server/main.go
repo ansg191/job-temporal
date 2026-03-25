@@ -24,7 +24,6 @@ func main() {
 
 	tc, err := client.Dial(client.Options{
 		HostPort: temporalAddress,
-
 	})
 	if err != nil {
 		log.Fatalf("failed to create temporal client: %v", err)
