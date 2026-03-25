@@ -84,7 +84,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: server.Dockerfile
+      dockerfile: deploy/server.Dockerfile
     container_name: job-temporal-server
     restart: unless-stopped
     depends_on:
@@ -107,7 +107,7 @@ services:
   trigger-server:
     build:
       context: .
-      dockerfile: trigger-server.Dockerfile
+      dockerfile: deploy/trigger-server.Dockerfile
     container_name: job-temporal-trigger-server
     restart: unless-stopped
     depends_on:
@@ -129,7 +129,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: worker.Dockerfile
+      dockerfile: deploy/worker.Dockerfile
     container_name: job-temporal-worker
     restart: unless-stopped
     depends_on:
