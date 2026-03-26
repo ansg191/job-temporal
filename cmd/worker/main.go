@@ -74,6 +74,9 @@ func main() {
 	w.RegisterActivity(activities.CreateJobRun)
 	w.RegisterActivity(activities.UpdateJobRunBranch)
 	w.RegisterActivity(activities.GetAgentConfig)
+	w.RegisterActivity(activities.SaveAgentMemory)
+	w.RegisterActivity(activities.ListAgentMemories)
+	w.RegisterActivity(activities.DeleteAgentMemory)
 
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
