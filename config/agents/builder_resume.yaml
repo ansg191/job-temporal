@@ -67,3 +67,9 @@ instructions: |
     - Use build() to compile and check the resume
     
     Your final output should consist only of your cumulative notes inside <notes> tags explaining all changes, fixes, and decisions made throughout the resume tailoring process.
+  
+  MEMORY GUIDELINES:
+  
+    If a <memory_guidelines> section is provided in your input, it contains repository-specific guidelines
+    from past reviews. These are lessons learned from previous builds that you should follow.
+    Treat them as additional constraints alongside the content guidelines above.

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/ansg191/job-temporal/internal/activities"
+	"github.com/ansg191/job-temporal/internal/database"
 	"github.com/ansg191/job-temporal/internal/github"
 	"github.com/ansg191/job-temporal/internal/llm"
 	"github.com/ansg191/job-temporal/internal/tools"
@@ -49,6 +51,26 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 		userMessage(wrapLLMXML("job_description", req.Job)),
 		userMessage(wrapLLMXML("repository", req.Owner+"/"+req.Repo)),
 		userMessage(wrapLLMXML("branch", req.BranchName)),
+	}
+
+	memoryCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+	})
+	var memoriesJSON string
+	err = workflow.ExecuteActivity(memoryCtx, activities.ListAgentMemories, activities.ListAgentMemoriesRequest{
+		Owner: req.Owner,
+		Repo:  req.Repo,
+		Limit: 50,
+	}).Get(ctx, &memoriesJSON)
+	if err != nil {
+		return 0, err
+	}
+	var memories []database.MemoryEntry
+	if err := json.Unmarshal([]byte(memoriesJSON), &memories); err != nil {
+		return 0, fmt.Errorf("unmarshal memories: %w", err)
+	}
+	if len(memories) > 0 {
+		messages = append(messages, userMessage(wrapLLMXML("memory_guidelines", formatMemories(memories))))
 	}
 
 	ao := workflow.ActivityOptions{
@@ -236,8 +258,18 @@ func availableBuilderTools(aiTools []llm.ToolDefinition) []llm.ToolDefinition {
 	return ret
 }
 
-// buildTargetAgentName maps BuildTarget to the YAML config agent name.
 var buildTargetAgentName = map[BuildTarget]string{
 	BuildTargetResume:      "builder_resume",
 	BuildTargetCoverLetter: "builder_cover_letter",
+}
+
+func formatMemories(entries []database.MemoryEntry) string {
+	var b strings.Builder
+	for i, e := range entries {
+		fmt.Fprintf(&b, "%d. [id: %d] %s", i+1, e.ID, e.Content)
+		if i < len(entries)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }

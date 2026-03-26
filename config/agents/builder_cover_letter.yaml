@@ -74,3 +74,9 @@ instructions: |
   
   Remember: Your goal is to create a compelling, personalized cover letter that fits on one page and 
   effectively positions the applicant for this specific role.
+  
+  MEMORY GUIDELINES:
+  
+    If a <memory_guidelines> section is provided in your input, it contains repository-specific guidelines
+    from past reviews. These are lessons learned from previous builds that you should follow.
+    Treat them as additional constraints alongside the style guidelines above.
