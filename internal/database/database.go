@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -31,6 +32,13 @@ type Database interface {
 	UpdateJobRunBranch(ctx context.Context, workflowID, branchName string) error
 	// ListJobRuns returns recent job runs ordered by creation time descending.
 	ListJobRuns(ctx context.Context, limit int) ([]JobRun, error)
+	// AddMemory inserts a new memory entry scoped to owner/repo. Returns the new entry's ID.
+	AddMemory(ctx context.Context, owner, repo, content string) (int, error)
+	// ListMemories returns the most recent memories for a repo, ordered oldest-first.
+	ListMemories(ctx context.Context, owner, repo string, limit int) ([]MemoryEntry, error)
+	// DeleteMemory removes a memory entry by ID, scoped to owner/repo. Returns true if a row was deleted.
+	// The owner/repo check prevents cross-repo deletion.
+	DeleteMemory(ctx context.Context, owner, repo string, id int) (bool, error)
 }
 
 type JobRun struct {
@@ -39,6 +47,12 @@ type JobRun struct {
 	ScrapedMarkdown string
 	BranchName      string
 	CreatedAt       time.Time
+}
+
+type MemoryEntry struct {
+	ID        int
+	Content   string
+	CreatedAt time.Time
 }
 
 type postgresDatabase struct {
@@ -166,6 +180,63 @@ func (p *postgresDatabase) ListJobRuns(ctx context.Context, limit int) ([]JobRun
 	}
 
 	return runs, nil
+}
+
+func (p *postgresDatabase) AddMemory(ctx context.Context, owner, repo, content string) (int, error) {
+	var id int
+	err := p.db.QueryRowContext(ctx,
+		"INSERT INTO agent_memory (owner, repo, content) VALUES ($1, $2, $3) RETURNING id",
+		owner, repo, content).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("add memory: %w", err)
+	}
+	return id, nil
+}
+
+func (p *postgresDatabase) ListMemories(ctx context.Context, owner, repo string, limit int) ([]MemoryEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT id, content, created_at FROM (
+			SELECT id, content, created_at FROM agent_memory
+			WHERE owner = $1 AND repo = $2
+			ORDER BY created_at DESC LIMIT $3
+		) sub ORDER BY created_at ASC`,
+		owner, repo, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list memories: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]MemoryEntry, 0, limit)
+	for rows.Next() {
+		var entry MemoryEntry
+		if err := rows.Scan(&entry.ID, &entry.Content, &entry.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list memories scan: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list memories rows: %w", err)
+	}
+
+	return entries, nil
+}
+
+func (p *postgresDatabase) DeleteMemory(ctx context.Context, owner, repo string, id int) (bool, error) {
+	result, err := p.db.ExecContext(ctx,
+		"DELETE FROM agent_memory WHERE id = $1 AND owner = $2 AND repo = $3",
+		id, owner, repo)
+	if err != nil {
+		return false, fmt.Errorf("delete memory: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete memory rows affected: %w", err)
+	}
+	return affected == 1, nil
 }
 
 func getDBUrl() string {
