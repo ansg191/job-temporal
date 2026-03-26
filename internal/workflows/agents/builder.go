@@ -68,6 +68,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	callAICtx := withCallAIActivityOptions(ctx)
 	layoutReviewRun := 0
 	enableLayoutReview := req.BuildTarget == BuildTargetResume
+	const layoutReviewMaxRuns = 5
 
 	dispatcher := &builderDispatcher{
 		aiTools:     aiTools,
@@ -104,7 +105,7 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			continue
 		}
 
-		if enableLayoutReview {
+		if enableLayoutReview && layoutReviewRun < layoutReviewMaxRuns {
 			// Layout review gate (resume only)
 			file, err := resolveBuildTargetFile(req.BuildTarget)
 			if err != nil {

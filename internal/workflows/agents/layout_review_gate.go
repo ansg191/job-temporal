@@ -12,9 +12,9 @@ import (
 
 const (
 	// Be strict initially, then relax to avoid endless loops when the editor is effectively blind.
-	layoutReviewStrictMediumAttempts = 3
+	layoutReviewStrictMediumAttempts = 2
 	// Even after relaxing, too many medium issues still blocks completion.
-	layoutReviewMaxMediumAfterRelax = 2
+	layoutReviewMaxMediumAfterRelax = 3
 )
 
 func runLayoutReviewGate(
