@@ -70,6 +70,10 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 	enableLayoutReview := req.BuildTarget == BuildTargetResume
 	const layoutReviewMaxRuns = 5
 
+	letterReviewRun := 0
+	enableLetterReview := req.BuildTarget == BuildTargetCoverLetter
+	const letterReviewMaxRuns = 5
+
 	dispatcher := &builderDispatcher{
 		aiTools:     aiTools,
 		ghOpts:      req.ClientOptions,
@@ -140,6 +144,29 @@ func BuilderAgent(ctx workflow.Context, req BuilderAgentRequest) (int, error) {
 			if block, reason := shouldBlockLayoutIssues(layoutReviewResult, layoutReviewRun); block {
 				messages = []llm.Message{userMessage(
 					"Layout review gate blocked completion (" + reason + "). Keep editing and rebuilding.\nCurrent findings JSON:\n" + layoutReviewJSON,
+				)}
+				continue
+			}
+		}
+
+		if enableLetterReview && letterReviewRun < letterReviewMaxRuns {
+			letterReviewRun++
+			letterReviewReq := activities.ReviewLetterContentRequest{
+				ClientOptions: req.ClientOptions,
+				Branch:        req.BranchName,
+				Job:           req.Job,
+			}
+			letterReviewResult, letterReviewJSON, err := runLetterReviewGate(
+				ctx,
+				MakeChildWorkflowID(ctx, "letter-review-gate", req.BranchName, strconv.Itoa(letterReviewRun)),
+				letterReviewReq,
+			)
+			if err != nil {
+				return 0, err
+			}
+			if block, reason := shouldBlockLetterIssues(letterReviewResult, letterReviewRun); block {
+				messages = []llm.Message{userMessage(
+					"Letter content review gate blocked completion (" + reason + "). Revise the letter and rebuild.\nCurrent findings JSON:\n" + letterReviewJSON,
 				)}
 				continue
 			}

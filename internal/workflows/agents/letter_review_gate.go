@@ -9,31 +9,31 @@ import (
 	"github.com/ansg191/job-temporal/internal/activities"
 )
 
-func runLayoutReviewGate(
+func runLetterReviewGate(
 	ctx workflow.Context,
 	childWorkflowID string,
-	req activities.ReviewPDFLayoutRequest,
-) (*activities.ReviewPDFLayoutOutput, string, error) {
+	req activities.ReviewLetterContentRequest,
+) (*activities.ReviewLetterContentOutput, string, error) {
 	var reviewJSON string
 	err := workflow.ExecuteChildWorkflow(
 		workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
 			WorkflowID: childWorkflowID,
 		}),
-		ReviewPDFLayoutWorkflow,
+		ReviewLetterContentWorkflow,
 		req,
 	).Get(ctx, &reviewJSON)
 	if err != nil {
 		return nil, "", err
 	}
 
-	var output activities.ReviewPDFLayoutOutput
+	var output activities.ReviewLetterContentOutput
 	if err = json.Unmarshal([]byte(reviewJSON), &output); err != nil {
-		return nil, "", fmt.Errorf("failed to parse layout review output: %w", err)
+		return nil, "", fmt.Errorf("failed to parse letter review output: %w", err)
 	}
 	return &output, reviewJSON, nil
 }
 
-func shouldBlockLayoutIssues(output *activities.ReviewPDFLayoutOutput, attempt int) (bool, string) {
+func shouldBlockLetterIssues(output *activities.ReviewLetterContentOutput, attempt int) (bool, string) {
 	if output == nil {
 		return false, ""
 	}

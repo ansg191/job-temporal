@@ -44,6 +44,8 @@ type ReviewPDFLayoutIssue struct {
 	FixHint   string `json:"fix_hint"`
 }
 
+func (i ReviewPDFLayoutIssue) GetSeverity() string { return i.Severity }
+
 type ReviewPDFLayoutOutput struct {
 	Summary      string                 `json:"summary"`
 	CheckedPages []int                  `json:"checked_pages"`

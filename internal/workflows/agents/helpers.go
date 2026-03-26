@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"go.temporal.io/sdk/workflow"
@@ -72,4 +73,40 @@ func temperatureOpt(t *float64) *float64 {
 
 func wrapLLMXML(tag, content string) string {
 	return fmt.Sprintf("<%s>\n%s\n</%s>", tag, content, tag)
+}
+
+const (
+	reviewGateStrictMediumAttempts = 2
+	reviewGateMaxMediumAfterRelax  = 3
+)
+
+type severityHolder interface {
+	GetSeverity() string
+}
+
+func shouldBlockReviewBySeverity[T severityHolder](issues []T, attempt int) (bool, string) {
+	high := 0
+	medium := 0
+	for _, issue := range issues {
+		switch strings.ToLower(strings.TrimSpace(issue.GetSeverity())) {
+		case "high":
+			high++
+		case "medium":
+			medium++
+		}
+	}
+
+	if high > 0 {
+		return true, "high severity issues remain"
+	}
+	if medium == 0 {
+		return false, ""
+	}
+	if attempt <= reviewGateStrictMediumAttempts {
+		return true, "medium severity issues remain during strict pass"
+	}
+	if medium > reviewGateMaxMediumAfterRelax {
+		return true, "too many medium severity issues remain"
+	}
+	return false, ""
 }
