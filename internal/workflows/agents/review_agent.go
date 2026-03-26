@@ -296,6 +296,32 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall
 			ReviewPDFLayoutWorkflow,
 			req,
 		), nil
+	case tools.SaveMemoryToolDesc.Name:
+		var args tools.SaveMemoryArgs
+		if err := tools.SaveMemoryToolParseArgs(call.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return workflow.ExecuteActivity(ctx, activities.SaveAgentMemory, activities.SaveAgentMemoryRequest{
+			Owner:   d.ghOpts.Owner,
+			Repo:    d.ghOpts.Repo,
+			Content: args.Content,
+		}), nil
+	case tools.ListMemoriesToolDesc.Name:
+		return workflow.ExecuteActivity(ctx, activities.ListAgentMemories, activities.ListAgentMemoriesRequest{
+			Owner: d.ghOpts.Owner,
+			Repo:  d.ghOpts.Repo,
+			Limit: 50,
+		}), nil
+	case tools.DeleteMemoryToolDesc.Name:
+		var args tools.DeleteMemoryArgs
+		if err := tools.DeleteMemoryToolParseArgs(call.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return workflow.ExecuteActivity(ctx, activities.DeleteAgentMemory, activities.DeleteAgentMemoryRequest{
+			Owner: d.ghOpts.Owner,
+			Repo:  d.ghOpts.Repo,
+			ID:    args.ID,
+		}), nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", call.Name)
 	}
@@ -307,6 +333,7 @@ func availableReviewTools(aiTools []llm.ToolDefinition, enableLayoutReview bool)
 	if enableLayoutReview {
 		ret = append(ret, tools.ReviewPDFLayoutToolDesc)
 	}
+	ret = append(ret, tools.SaveMemoryToolDesc, tools.ListMemoriesToolDesc, tools.DeleteMemoryToolDesc)
 	return ret
 }
 

@@ -126,3 +126,23 @@ instructions: |
     ```
         
     Your final response to the reviewer should be professional and concise, explaining what you did at a high level. Do not duplicate or rehash the detailed analysis from your scratchpad, and do not include implementation details or raw tool call results in your response to the reviewer.
+  
+  ## Memory Management
+
+  You have access to memory tools that persist guidelines for future builder agents.
+
+  **When to save a memory — you MUST call `save_memory(content)` when:**
+    - A reviewer gives a directive about how documents should be written (e.g., "Always mention X", "Never use Y", "Include Z in the first paragraph")
+    - You notice a pattern the reviewer has corrected before
+    - The reviewer expresses a preference about tone, structure, or content that should apply to all future builds
+
+  **Before saving, call `list_memories()` first** to check if a similar guideline already exists. Do not save duplicates.
+    
+  **Tools:**
+    - `save_memory(content)` — Save a guideline for future builders. Write it as a clear instruction, e.g., "Always mention the applicant's BS in Computer Science from UCR (March 2026) in the first paragraph of cover letters"
+    - `list_memories()` — List all saved guidelines for this repository
+    - `delete_memory(id)` — Remove an outdated or incorrect guideline
+    
+  Memory is scoped to this repository — entries are only visible to agents working on this repo.
+  
+  **Important:** If the reviewer's feedback contains a general rule (words like "always", "never", "make sure to", "from now on"), you MUST save it as a memory. This is not optional.
