@@ -164,14 +164,37 @@ func findPosition(root *html.Node) (string, error) {
 }
 
 func findCompany(root *html.Node) (string, error) {
+	// Preferred: company rendered as a link.
 	target := findNodeWithClass(root, "topcard__org-name-link")
-	if target == nil {
-		return "", errors.New("company not found")
+	if target != nil && target.FirstChild != nil {
+		company := strings.TrimSpace(target.FirstChild.Data)
+		company = "# " + multiSpacePattern.ReplaceAllString(company, " ")
+		return company, nil
 	}
 
-	company := strings.TrimSpace(target.FirstChild.Data)
-	company = "# " + multiSpacePattern.ReplaceAllString(company, " ")
-	return company, nil
+	// Fallback: company rendered as plain text inside the first
+	// topcard__flavor span (the second span in the row is the location).
+	row := findNodeWithClass(root, "topcard__flavor-row")
+	if row != nil {
+		for child := row.FirstChild; child != nil; child = child.NextSibling {
+			if child.Type != html.ElementNode {
+				continue
+			}
+			if !hasClass(child, "topcard__flavor") {
+				continue
+			}
+			// Skip the location span (has the bullet modifier).
+			if hasClass(child, "topcard__flavor--bullet") {
+				continue
+			}
+			text := extractText(child)
+			if text != "" {
+				return "# " + multiSpacePattern.ReplaceAllString(text, " "), nil
+			}
+		}
+	}
+
+	return "", errors.New("company not found")
 }
 
 func findCriteriaList(root *html.Node) (string, error) {
@@ -192,6 +215,21 @@ func findCriteriaList(root *html.Node) (string, error) {
 	}
 
 	return "### Job Criteria:\n\n" + strings.Join(criteria, "\n\n"), nil
+}
+
+func extractText(n *html.Node) string {
+	var sb strings.Builder
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node.Type == html.TextNode {
+			sb.WriteString(node.Data)
+		}
+		for c := node.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return strings.TrimSpace(sb.String())
 }
 
 func findNodeWithClass(root *html.Node, classToken string) *html.Node {

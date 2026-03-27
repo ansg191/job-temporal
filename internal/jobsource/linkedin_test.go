@@ -144,6 +144,86 @@ func TestParseLinkedInDescriptionFromFile(t *testing.T) {
 	}
 }
 
+func TestParseLinkedInDescriptionPlainTextCompany(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<html><body>
+	<h1 class="topcard__title">Software Engineer</h1>
+	<div class="topcard__flavor-row">
+		<span class="topcard__flavor">
+			Acme Corp
+		</span>
+		<span class="topcard__flavor topcard__flavor--bullet">
+			San Francisco, CA
+		</span>
+	</div>
+	<ul class="description__job-criteria-list">
+		<li class="description__job-criteria-item">
+			<h3 class="description__job-criteria-subheader">Seniority level</h3>
+			<span class="description__job-criteria-text">Entry level</span>
+		</li>
+	</ul>
+	<div class="description__text description__text--rich">
+		<section class="show-more-less-html">
+			<div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5">
+				<p>Build backend services in Go.</p>
+			</div>
+		</section>
+	</div>
+</body></html>`
+
+	got, err := parseLinkedInDescription(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parseLinkedInDescription returned error: %v", err)
+	}
+
+	wantContains := []string{
+		"# Acme Corp",
+		"## Software Engineer",
+		"**Seniority level**: Entry level",
+		"Build backend services in Go.",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Fatalf("description missing %q in:\n%s", want, got)
+		}
+	}
+
+	if strings.Contains(got, "San Francisco") {
+		t.Fatalf("location should not appear in company heading, got:\n%s", got)
+	}
+}
+
+func TestParseLinkedInDescriptionFromFilePlainTextCompany(t *testing.T) {
+	t.Parallel()
+
+	f, err := os.Open("testdata/linkedin_4391074285.html")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	got, err := parseLinkedInDescription(f)
+	if err != nil {
+		t.Fatalf("parseLinkedInDescription returned error: %v", err)
+	}
+
+	wantContains := []string{
+		"# Laerdal Labs DC",
+		"## Software Engineer",
+		"**Seniority level**: Associate",
+		"**Employment type**: Full-time",
+		"**Job function**: Engineering",
+		"**Industries**: Software Development",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Fatalf("description missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestLinkedInFetch(t *testing.T) {
 	t.Parallel()
 
