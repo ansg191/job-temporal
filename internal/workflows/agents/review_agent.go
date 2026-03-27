@@ -266,12 +266,12 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall
 			File:          file,
 		}
 		return workflow.ExecuteActivity(ctx, activities.Build, req), nil
-	case tools.ReviewPDFLayoutToolDesc.Name:
+	case tools.OracleToolDesc.Name:
 		if d.buildTarget != BuildTargetResume {
-			return nil, fmt.Errorf("review_pdf_layout is only available for resume builds")
+			return nil, fmt.Errorf("oracle is only available for resume builds")
 		}
-		args := tools.ReviewPDFLayoutArgs{}
-		if err := tools.ReviewPDFLayoutToolParseArgs(call.Arguments, &args); err != nil {
+		var args tools.OracleArgs
+		if err := tools.OracleToolParseArgs(call.Arguments, &args); err != nil {
 			return nil, err
 		}
 
@@ -280,22 +280,37 @@ func (d *reviewAgentDispatcher) Dispatch(ctx workflow.Context, call llm.ToolCall
 			return nil, err
 		}
 
-		req := activities.ReviewPDFLayoutRequest{
+		req := OracleRequest{
 			ClientOptions: d.ghOpts,
 			Branch:        d.branchName,
-			Builder:       "typst", // TODO: remove this hardcoded builder
+			Builder:       "typst",
 			File:          file,
-			PageStart:     args.PageStart,
-			PageEnd:       args.PageEnd,
-			Notes:         args.Notes,
+			Label:         args.Label,
+			Questions:     args.Questions,
 		}
 		return workflow.ExecuteChildWorkflow(
 			workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-				WorkflowID: MakeChildWorkflowID(ctx, "review-pdf-layout", d.branchName, call.CallID),
+				WorkflowID: MakeChildWorkflowID(ctx, "oracle", d.branchName, call.CallID),
 			}),
-			ReviewPDFLayoutWorkflow,
+			OracleWorkflow,
 			req,
 		), nil
+	case tools.ListLabelsToolDesc.Name:
+		if d.buildTarget != BuildTargetResume {
+			return nil, fmt.Errorf("list_labels is only available for resume builds")
+		}
+
+		file, err := resolveBuildTargetFile(d.buildTarget)
+		if err != nil {
+			return nil, err
+		}
+
+		req := activities.ListLabelsRequest{
+			ClientOptions: d.ghOpts,
+			Branch:        d.branchName,
+			File:          file,
+		}
+		return workflow.ExecuteActivity(ctx, activities.ListLabels, req), nil
 	case tools.SaveMemoryToolDesc.Name:
 		var args tools.SaveMemoryArgs
 		if err := tools.SaveMemoryToolParseArgs(call.Arguments, &args); err != nil {
@@ -331,7 +346,7 @@ func availableReviewTools(aiTools []llm.ToolDefinition, enableLayoutReview bool)
 	ret := append([]llm.ToolDefinition{}, aiTools...)
 	ret = append(ret, tools.BuildToolDesc)
 	if enableLayoutReview {
-		ret = append(ret, tools.ReviewPDFLayoutToolDesc)
+		ret = append(ret, tools.OracleToolDesc, tools.ListLabelsToolDesc)
 	}
 	ret = append(ret, tools.SaveMemoryToolDesc, tools.ListMemoriesToolDesc, tools.DeleteMemoryToolDesc)
 	return ret
