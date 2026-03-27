@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,6 +62,13 @@ type jobRunsPageData struct {
 	Error string
 }
 
+type memoriesPageData struct {
+	Repo     string
+	Memories []database.MemoryEntry
+	Error    string
+	Success  string
+}
+
 func main() {
 	var (
 		tc  client.Client
@@ -104,6 +112,9 @@ func main() {
 	mux.HandleFunc("/", app.handleForm)
 	mux.HandleFunc("/job-runs", app.handleJobRuns)
 	mux.HandleFunc("/submit", app.handleSubmit)
+	mux.HandleFunc("/memories", app.handleMemories)
+	mux.HandleFunc("/memories/add", app.handleAddMemory)
+	mux.HandleFunc("/memories/delete", app.handleDeleteMemory)
 	mux.HandleFunc("/health", healthHandler)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
@@ -245,6 +256,148 @@ func (a *app) renderJobRuns(w http.ResponseWriter, data jobRunsPageData) {
 	if err := a.tpl.ExecuteTemplate(w, "job_runs.html", data); err != nil {
 		http.Error(w, fmt.Sprintf("template render error: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func (a *app) renderMemories(w http.ResponseWriter, data memoriesPageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := a.tpl.ExecuteTemplate(w, "memories.html", data); err != nil {
+		http.Error(w, fmt.Sprintf("template render error: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (a *app) handleMemories(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	repoInput := r.URL.Query().Get("repo")
+	if repoInput == "" {
+		a.renderMemories(w, memoriesPageData{})
+		return
+	}
+
+	owner, repo, err := parseRepo(repoInput)
+	if err != nil {
+		a.renderMemories(w, memoriesPageData{Repo: repoInput, Error: err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	memories, err := a.db.ListMemories(ctx, owner, repo, 0)
+	if err != nil {
+		a.renderMemories(w, memoriesPageData{Repo: repoInput, Error: fmt.Sprintf("unable to list memories: %v", err)})
+		return
+	}
+
+	a.renderMemories(w, memoriesPageData{Repo: repoInput, Memories: memories})
+}
+
+func (a *app) handleAddMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		a.renderMemories(w, memoriesPageData{Error: fmt.Sprintf("invalid form body: %v", err)})
+		return
+	}
+
+	repoInput := strings.TrimSpace(r.FormValue("repo"))
+	content := strings.TrimSpace(r.FormValue("content"))
+	data := memoriesPageData{Repo: repoInput}
+
+	owner, repo, err := parseRepo(repoInput)
+	if err != nil {
+		data.Error = err.Error()
+		a.renderMemories(w, data)
+		return
+	}
+
+	if content == "" {
+		data.Error = "content is required"
+		a.renderMemories(w, data)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if _, err := a.db.AddMemory(ctx, owner, repo, content); err != nil {
+		data.Error = fmt.Sprintf("unable to add memory: %v", err)
+		a.renderMemories(w, data)
+		return
+	}
+
+	memories, err := a.db.ListMemories(ctx, owner, repo, 0)
+	if err != nil {
+		data.Error = fmt.Sprintf("unable to reload memories: %v", err)
+		a.renderMemories(w, data)
+		return
+	}
+
+	data.Memories = memories
+	data.Success = "Memory added successfully"
+	a.renderMemories(w, data)
+}
+
+func (a *app) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		a.renderMemories(w, memoriesPageData{Error: fmt.Sprintf("invalid form body: %v", err)})
+		return
+	}
+
+	repoInput := strings.TrimSpace(r.FormValue("repo"))
+	data := memoriesPageData{Repo: repoInput}
+
+	owner, repo, err := parseRepo(repoInput)
+	if err != nil {
+		data.Error = err.Error()
+		a.renderMemories(w, data)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		data.Error = "invalid memory ID"
+		a.renderMemories(w, data)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	deleted, err := a.db.DeleteMemory(ctx, owner, repo, id)
+	if err != nil {
+		data.Error = fmt.Sprintf("unable to delete memory: %v", err)
+		a.renderMemories(w, data)
+		return
+	}
+	if !deleted {
+		data.Error = "memory not found (it may belong to a different repository)"
+		a.renderMemories(w, data)
+		return
+	}
+
+	memories, err := a.db.ListMemories(ctx, owner, repo, 0)
+	if err != nil {
+		data.Error = fmt.Sprintf("unable to reload memories: %v", err)
+		a.renderMemories(w, data)
+		return
+	}
+
+	data.Memories = memories
+	data.Success = "Memory deleted"
+	a.renderMemories(w, data)
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Memories</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="container">
+    <section class="panel">
+      <div class="top-actions">
+        <a class="link-btn" href="/">Job Trigger</a>
+        <a class="link-btn" href="/job-runs">Job Runs</a>
+      </div>
+      <h1>Agent Memories</h1>
+      <p class="subtitle">View and manage agent memories for a repository.</p>
+      <form method="get" action="/memories">
+        <div>
+          <label for="repo">Repo (owner/repo)</label>
+          <input id="repo" name="repo" type="text" value="{{.Repo}}" placeholder="ansg191/resume" required>
+        </div>
+        <button type="submit">Load Memories</button>
+      </form>
+    </section>
+
+    {{if .Error}}
+    <div class="notice error">{{.Error}}</div>
+    {{end}}
+
+    {{if .Success}}
+    <div class="notice success">{{.Success}}</div>
+    {{end}}
+
+    {{if .Repo}}
+    {{if .Memories}}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="runs-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Content</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Memories}}
+            <tr>
+              <td>{{.ID}}</td>
+              <td class="memory-content">{{.Content}}</td>
+              <td>{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}}</td>
+              <td>
+                <form method="post" action="/memories/delete">
+                  <input type="hidden" name="repo" value="{{$.Repo}}">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button type="submit" class="btn-delete">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {{else}}
+    <div class="notice">No memories found for this repository.</div>
+    {{end}}
+
+    <section class="panel">
+      <h2>Add Memory</h2>
+      <form method="post" action="/memories/add">
+        <input type="hidden" name="repo" value="{{.Repo}}">
+        <div>
+          <label for="content">Memory Content</label>
+          <textarea id="content" name="content" rows="3" placeholder="e.g. Always mention recent BS graduate from UCR..." required></textarea>
+        </div>
+        <button type="submit">Save Memory</button>
+      </form>
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>

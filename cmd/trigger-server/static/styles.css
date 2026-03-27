@@ -45,6 +45,7 @@ body {
 .top-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-bottom: 0.35rem;
 }
 
@@ -251,6 +252,46 @@ pre {
   border-left: 4px solid #bcd5ff;
   padding: 0.1rem 0 0.1rem 0.8rem;
   color: #2d4670;
+}
+
+textarea {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(15, 111, 255, 0.14);
+}
+
+.btn-delete {
+  width: fit-content;
+  border: 1px solid #ffc9c9;
+  border-radius: 8px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  padding: 0.35rem 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.15s ease;
+}
+
+.btn-delete:hover {
+  border-color: var(--error-text);
+}
+
+.memory-content {
+  word-break: break-word;
+  max-width: 480px;
 }
 
 @media (max-width: 640px) {
