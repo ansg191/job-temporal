@@ -60,7 +60,7 @@ func CropPNG(pngData []byte, rect image.Rectangle) ([]byte, error) {
 }
 
 // CropRectsForLabel converts a Typst label bounding box
-// (in points) into pixel-space crop rectangles — one per
+// (in points) into pixel-space crop rectangles, one per
 // page the section occupies.
 //
 // For single-page sections the result is one rect covering
@@ -70,8 +70,8 @@ func CropPNG(pngData []byte, rect image.Rectangle) ([]byte, error) {
 // The total number of pages is capped at maxPages.
 //
 // The bbox coordinates come from `typst query` and use the
-// format "123.45pt". PPI controls the pt→px conversion
-// (192 PPI = 2.667× scale).
+// format "123.45pt". PPI controls the pt-to-px conversion
+// (192 PPI = 2.667x scale).
 func CropRectsForLabel(bbox builder.LabelBBox, ppi int, maxPages int) ([]PageCropRect, error) {
 	if ppi <= 0 {
 		return nil, fmt.Errorf("ppi must be positive")
