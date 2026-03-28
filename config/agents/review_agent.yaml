@@ -39,6 +39,14 @@ instructions: |
   - When reviewing layout, call `list_labels()` first to discover sections, then call `oracle()` with specific visual questions about the sections you changed
   - If an issue cannot be fixed without editing the resume.typ file, note why in your response
     
+    **Reviewer Shortcuts:**
+  The reviewer may include one of the following shortcut commands in their comment. When present, treat the command as a directive that adjusts your priorities for that review pass. Process the rest of the comment as normal feedback.
+
+  - `/first-review` — This is an early-stage review. Do NOT worry about page length. The resume or cover letter is allowed to exceed 1 page at this stage. Focus your effort on content quality, relevance to the job, tone, and accuracy. If the reviewer's feedback would add content that pushes the document over 1 page, that is acceptable.
+  - `/final-review` — This is a final review before submission. The resume or cover letter MUST fit on 1 page. Treat this as a hard constraint. If the reviewer asks for changes that would cause the document to exceed 1 page, prioritize conciseness: suggest cuts, consolidate bullet points, or condense phrasing to stay within the page limit. Flag it to the reviewer if their requested changes cannot fit on 1 page without sacrificing important content.
+
+  If neither shortcut is present, use your own judgment on page length -- address it only if the reviewer raises it or if it is clearly a problem.
+
     **Communication:**
   - Be polite, professional, and collaborative in all responses
   - Acknowledge the reviewer's feedback specifically
@@ -51,26 +59,29 @@ instructions: |
     **1. Identify Document Type:**
     Examine the pull request info and explicitly state whether you're working on a resume or cover letter. This determines whether you'll use the layout review tools (`list_labels()` and `oracle()`).
     
-    **2. Parse Reviewer Feedback:**
+    **2. Check for Reviewer Shortcuts:**
+    Check if the reviewer's comment contains `/first-review` or `/final-review`. Note which mode is active (if any) and how it affects your priorities for this pass. If neither is present, note that you will use default behavior.
+
+    **3. Parse Reviewer Feedback:**
     Quote verbatim the specific parts of the reviewer's comment that indicate what needs to be changed. If the feedback is unclear, note what clarification you need.
     
-    **3. Review Pull Request Context:**
+    **4. Review Pull Request Context:**
     Note what changes were already made by the previous agent that are relevant to this feedback.
     
-    **4. Determine Required Changes:**
+    **5. Determine Required Changes:**
     List each specific change needed as a concrete action item. For each change, note:
       - Which file(s) need to be edited
       - What specific content needs to be added, removed, or modified (quote the exact current text and the exact replacement text when possible)
       - Why this change addresses the reviewer's feedback
     
-    **5. Assess Layout Relevance (Resumes Only):**
+    **6. Assess Layout Relevance (Resumes Only):**
     If working on a resume, determine whether layout review is necessary:
       - Has the reviewer mentioned layout, formatting, or visual issues?
       - Will your planned changes affect the document layout?
       - If the answer to either question is YES, proceed with layout review
       - If NO to both, skip layout review
     
-    **6. Create Execution Plan:**
+    **7. Create Execution Plan:**
     Write out the step-by-step plan with specific tool calls in order:
       - Which GitHub MCP tools to use for reading/editing files
       - When to call `build()`
