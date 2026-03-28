@@ -2,8 +2,11 @@ package activities
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 
+	gh "github.com/google/go-github/v81/github"
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/ansg191/job-temporal/internal/github"
@@ -45,7 +48,20 @@ func CreateBranch(ctx context.Context, req CreateBranchRequest) error {
 		)
 	}
 
-	return client.CreateBranch(ctx, req.Branch)
+	err = client.CreateBranch(ctx, req.Branch)
+	if err != nil {
+		var ghErr *gh.ErrorResponse
+		if errors.As(err, &ghErr) && ghErr.Response != nil &&
+			ghErr.Response.StatusCode == http.StatusUnprocessableEntity {
+			return temporal.NewNonRetryableApplicationError(
+				err.Error(),
+				"ErrorResponse",
+				err,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 type CreatePullRequestRequest struct {
