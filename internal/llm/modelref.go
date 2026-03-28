@@ -10,6 +10,7 @@ type BackendType string
 const (
 	BackendOpenAI    BackendType = "openai"
 	BackendAnthropic BackendType = "anthropic"
+	BackendClaude    BackendType = "claude"
 )
 
 type ModelRef struct {
@@ -36,6 +37,8 @@ func ParseModelRef(model string) (ModelRef, error) {
 			return ModelRef{Raw: model, Backend: BackendOpenAI, Provider: string(BackendOpenAI), Model: parts[1]}, nil
 		case string(BackendAnthropic):
 			return ModelRef{Raw: model, Backend: BackendAnthropic, Provider: string(BackendAnthropic), Model: parts[1]}, nil
+		case string(BackendClaude):
+			return ModelRef{Raw: model, Backend: BackendClaude, Provider: string(BackendAnthropic), Model: parts[1]}, nil
 		default:
 			return ModelRef{}, fmt.Errorf("unsupported model backend %q", parts[0])
 		}

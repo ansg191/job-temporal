@@ -15,6 +15,8 @@ func NewBackend(ref ModelRef) (Backend, error) {
 		return &openAIBackend{}, nil
 	case BackendAnthropic:
 		return &anthropicBackend{}, nil
+	case BackendClaude:
+		return newClaudeBackend()
 	default:
 		return nil, NewConfigError("unsupported backend %q", ref.Backend)
 	}

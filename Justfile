@@ -76,6 +76,13 @@ test-pkg PKG:
 test-run PATTERN:
     go test -v -run '{{ PATTERN }}' ./...
 
+# Smoke-test the claude backend (OAuth via auth.json) against the real API
+# Usage: just claude-test
+#        just claude-test "What is 2+2?"
+#        just claude-test "What is 2+2?" claude-sonnet-4-6
+claude-test prompt="Say hello in exactly 5 words." model="claude-haiku-4-5":
+    go run ./cmd/claude-test -model "{{ model }}" -prompt "{{ prompt }}"
+
 # ─── Lint & Format ───────────────────────────────────────────────────────────
 
 # Run all checks (fmt, vet, lint)
