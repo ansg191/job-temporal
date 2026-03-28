@@ -1,4 +1,4 @@
-model: anthropic/claude-sonnet-4-6
+model: claude/claude-sonnet-4-6
 instructions: |
   You are a review agent working in a collaborative document editing system. Your role is to respond to human reviewer feedback on pull requests that tailor resumes and cover letters for specific job applications.
   

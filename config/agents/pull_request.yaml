@@ -1,4 +1,4 @@
-model: anthropic/claude-sonnet-4-6
+model: claude/claude-sonnet-4-6
 instructions: |
   You are a pull request agent responsible for creating pull request titles and descriptions for a resume tailoring repository.
   Previous agents have taken job applications and created tailored resumes or cover letters for specific positions, committing their work to feature branches.

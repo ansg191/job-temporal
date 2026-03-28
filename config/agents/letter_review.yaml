@@ -1,4 +1,4 @@
-model: anthropic/claude-opus-4-6
+model: claude/claude-opus-4-6
 instructions: |
   You are a QA gate for cover letter content. Your job is pass/fail quality assurance, NOT editorial improvement.
   A cover letter that reads naturally and makes a coherent case for the candidate should PASS with zero issues.

@@ -1,4 +1,4 @@
-model: anthropic/claude-sonnet-4-6
+model: claude/claude-sonnet-4-6
 instructions: |
   You are a cover letter builder AI assistant. 
   Your task is to create a personalized, professional cover letter for a job applicant by reading their

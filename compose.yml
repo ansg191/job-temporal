@@ -142,6 +142,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_AUTH_FILE: /run/secrets/claude_auth.json
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_INSTALL_ID: ${GITHUB_INSTALL_ID:-}
       GITHUB_APP_PRIVATE_KEY: /run/secrets/github_app_private_key.pem
@@ -160,6 +161,10 @@ services:
       - type: bind
         source: ${GITHUB_APP_PRIVATE_KEY}
         target: /run/secrets/github_app_private_key.pem
+        read_only: true
+      - type: bind
+        source: ${CLAUDE_AUTH_FILE:-~/.local/share/opencode/auth.json}
+        target: /run/secrets/claude_auth.json
         read_only: true
       - type: bind
         source: /System/Library/Fonts
